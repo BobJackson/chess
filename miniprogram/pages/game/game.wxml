@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="topbar">
+    <text class="mode">{{modeLabel}}</text>
+    <text class="status">{{statusText}}</text>
+  </view>
+
+  <canvas
+    id="board"
+    type="2d"
+    class="board"
+    style="height: {{canvasHeight}}px;"
+    bindtouchstart="onTouchStart"
+    bindtouchmove="onTouchMove"
+    bindtouchend="onTouchEnd"
+    bindtouchcancel="onTouchCancel"
+  ></canvas>
+
+  <view class="toolbar">
+    <button size="mini" bindtap="onUndo">悔棋</button>
+    <button size="mini" bindtap="onHint">提示</button>
+    <button size="mini" bindtap="onFlip">翻转</button>
+    <button size="mini" bindtap="onRestart">重开</button>
+    <button size="mini" bindtap="onBack">菜单</button>
+  </view>
+</view>

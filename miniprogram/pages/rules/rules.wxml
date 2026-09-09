@@ -1,0 +1,33 @@
+<view class="rules">
+  <view class="section">
+    <view class="h">棋盘与目标</view>
+    <view class="p">棋盘为 9 条纵线 × 10 条横线，棋子走在交叉点上，双方各 16 枚。中间为「楚河汉界」，两侧各有「九宫」。</view>
+    <view class="p">红方先行，双方轮流走子。把对方的将（帅）将死，或使对方无子可动，即获胜。</view>
+  </view>
+
+  <view class="section">
+    <view class="h">棋子走法</view>
+    <view class="p">帅（将）：只在九宫内每次走一步直线。</view>
+    <view class="p">仕（士）：只在九宫内每次走一步斜线。</view>
+    <view class="p">相（象）：走「田」字，不能过河，田心被堵则不能走。</view>
+    <view class="p">马：走「日」字，蹩马腿时不能走。</view>
+    <view class="p">车：直线任意格数，不能越子。</view>
+    <view class="p">炮：直线移动不吃子时可越子不限；吃子时必须隔恰好一枚棋子（炮架）。</view>
+    <view class="p">兵（卒）：过河前只能向前一步；过河后可向前或横走一步，永远不能后退。</view>
+  </view>
+
+  <view class="section">
+    <view class="h">将军与胜负</view>
+    <view class="p">走子后威胁对方将（帅）称为「将军」，被将方必须立即应将。</view>
+    <view class="p">将死（无法应将）或困毙（无子可动）均判负。</view>
+    <view class="p">双方将（帅）不能在同一条纵线上直接照面（中间无子）。</view>
+    <view class="p">连续将军不变作负（长将判负）；双方不变三次重复判和；连续 60 回合无吃子判和。</view>
+  </view>
+
+  <view class="section">
+    <view class="h">操作说明</view>
+    <view class="p">点选：先点己方棋子，再点绿色落点走子。</view>
+    <view class="p">拖拽：按住棋子拖到落点松手走子，拖拽中会高亮松手落点。</view>
+    <view class="p">工具栏：悔棋、提示、翻转视角、重新开始、返回菜单。</view>
+  </view>
+</view>

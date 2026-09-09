@@ -1,0 +1,43 @@
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: #f3e9d2;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 24rpx;
+}
+
+.mode {
+  font-size: 24rpx;
+  color: #8d6e63;
+}
+
+.status {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #4e342e;
+}
+
+.board {
+  display: block;
+  width: 100%;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+}
+
+.toolbar button {
+  background: #e8d9b8;
+  color: #4e342e;
+  font-size: 26rpx;
+  border-radius: 12rpx;
+}

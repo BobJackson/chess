@@ -1,0 +1,20 @@
+{
+  "name": "wechat-chess",
+  "version": "1.0.0",
+  "description": "微信小程序中国象棋：人机对战 + 本地双人 + 好友联机",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/test-engine.js && node scripts/test-ai.js && node scripts/test-game.js && node scripts/test-ui.js && node scripts/test-controller.js && node scripts/test-net.js && node scripts/test-page.js",
+    "test:engine": "node scripts/test-engine.js",
+    "test:ai": "node scripts/test-ai.js",
+    "test:game": "node scripts/test-game.js",
+    "test:ui": "node scripts/test-ui.js",
+    "test:controller": "node scripts/test-controller.js",
+    "test:net": "node scripts/test-net.js",
+    "test:page": "node scripts/test-page.js"
+  },
+  "engines": {
+    "node": ">=12"
+  },
+  "license": "MIT"
+}

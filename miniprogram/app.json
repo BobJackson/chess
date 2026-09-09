@@ -1,0 +1,17 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/game/game",
+    "pages/online/online",
+    "pages/rules/rules"
+  ],
+  "window": {
+    "navigationBarTitleText": "中国象棋",
+    "navigationBarBackgroundColor": "#5d4037",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f3e9d2",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

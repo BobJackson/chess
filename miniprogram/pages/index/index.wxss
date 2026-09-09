@@ -1,0 +1,84 @@
+.menu {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 80rpx 56rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 72rpx;
+}
+
+.title {
+  font-size: 64rpx;
+  font-weight: 700;
+  letter-spacing: 8rpx;
+  color: #4e342e;
+}
+
+.subtitle {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: #8d6e63;
+  letter-spacing: 4rpx;
+}
+
+.group {
+  margin-bottom: 56rpx;
+}
+
+.label {
+  font-size: 26rpx;
+  color: #6d4c41;
+  margin-bottom: 16rpx;
+}
+
+.seg {
+  display: flex;
+  background: #e8d9b8;
+  border-radius: 16rpx;
+  overflow: hidden;
+}
+
+.seg-item {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 26rpx;
+  color: #6d4c41;
+}
+
+.seg-item.on {
+  background: #5d4037;
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn {
+  width: 100%;
+  margin-bottom: 28rpx;
+  border-radius: 16rpx;
+  font-size: 32rpx;
+  line-height: 96rpx;
+  height: 96rpx;
+}
+
+.btn.primary {
+  background: #5d4037;
+  color: #fff;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: #5d4037;
+  border: 2rpx solid #5d4037;
+}
+
+.foot {
+  margin-top: auto;
+  text-align: center;
+  font-size: 22rpx;
+  color: #a1887f;
+}

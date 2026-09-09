@@ -1,0 +1,26 @@
+<view class="lobby">
+  <view class="hero">
+    <view class="title">好友联机</view>
+    <view class="subtitle">创建房间或输入房间号与好友对弈</view>
+  </view>
+
+  <view class="card">
+    <button class="btn primary" loading="{{busy}}" bindtap="onCreate">创建房间</button>
+    <view class="code" wx:if="{{myCode}}">房间号：{{myCode}}</view>
+  </view>
+
+  <view class="divider">或</view>
+
+  <view class="card">
+    <input
+      class="input"
+      placeholder="输入 4 位房间号"
+      maxlength="4"
+      value="{{inputCode}}"
+      bindinput="onInputCode"
+    />
+    <button class="btn primary" loading="{{busy}}" bindtap="onJoin">加入房间</button>
+  </view>
+
+  <view class="status" wx:if="{{statusText}}">{{statusText}}</view>
+</view>
