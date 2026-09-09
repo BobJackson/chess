@@ -38,11 +38,11 @@ console.log('\n[1] 中文记谱：红方（汉字纵线号）');
   var pos = new Position();
   var cases = [
     [[7, 7], [4, 7], '炮二平五'],   // 中炮
-    [[8, 9], [8, 7], '車一进二'],   // 直线子进退记格数
+    [[8, 9], [8, 7], '俥一进二'],   // 直线子进退记格数
     [[6, 9], [4, 7], '相三进五'],   // 斜线子进退记终点纵线号
     [[5, 9], [4, 8], '仕四进五'],
-    [[4, 9], [4, 8], '帅五进一'],   // (3,9) 初始有己方仕，改用前进一格
-    [[7, 9], [6, 7], '马二进三'],
+    [[4, 9], [4, 8], '帥五进一'],   // (3,9) 初始有己方仕，改用前进一格
+    [[7, 9], [6, 7], '傌二进三'],
     [[2, 6], [2, 5], '兵七进一']
   ];
   cases.forEach(function (item) {
@@ -67,13 +67,13 @@ console.log('\n[2] 中文记谱：黑方（阿拉伯纵线号）');
   pos.makeMove(C.idxOf(7, 7), C.idxOf(4, 7), undo);
 
   var cases = [
-    [[7, 0], [6, 2], '马8进7'],
-    [[1, 0], [2, 2], '马2进3'],
+    [[7, 0], [6, 2], '傌8进7'],
+    [[1, 0], [2, 2], '傌2进3'],
     [[0, 0], [0, 1], '車1进1'],   // 車在底线前进一格
     [[3, 0], [4, 1], '士4进5'],
     [[2, 3], [2, 4], '卒3进1'],
-    [[4, 0], [4, 1], '将5进1'],   // 将帅只走直线，进退记格数
-    [[7, 2], [4, 2], '炮8平5']
+    [[4, 0], [4, 1], '將5进1'],   // 将帅只走直线，进退记格数
+    [[7, 2], [4, 2], '砲8平5']
   ];
   cases.forEach(function (item) {
     var from = C.idxOf(item[0][0], item[0][1]);
@@ -114,7 +114,7 @@ console.log('\n[4] 终局：将死');
   var r = play(game, 8, 5, 8, 0);
   assert('走法被接受', r.ok, true);
   console.log('        着法记谱: ' + r.text);
-  assert('记谱含绝杀标记', r.text, '車一进五绝杀');
+  assert('记谱含绝杀标记', r.text, '俥一进五绝杀');
   assert('对局已结束', !!game.result, true);
   assert('胜方为红', game.result && game.result.winner, C.RED);
   assert('终局原因', game.result && game.result.reason, '将死');
@@ -227,21 +227,31 @@ console.log('\n[8] 终局：自然限着（连续无吃子判和）');
 
 console.log('\n[9] 悔棋可逆性');
 (function () {
-  var game = new Game();
-  var startFen = game.pos.toFen();
-  var snapshots = [startFen];
+  var game = null;
+  var startFen = null;
+  var snapshots = [];
   var plies = 0;
   var captures = 0;
 
-  // 用入门级 AI 自我对弈 24 手，中途必然出现吃子与将军
-  while (plies < 24 && !game.result) {
-    var r = AI.findBestMove(game.pos, { level: 'beginner' });
-    if (!r) break;
-    if (game.pos.board[r.to] !== C.EMPTY) captures++;
-    var res = game.move(r.from, r.to);
-    if (!res.ok) break;
-    plies++;
-    snapshots.push(game.pos.toFen());
+  // 用入门级 AI 自我对弈 24 手，中途必然出现吃子与将军。
+  // beginner 含随机失误，偶有对局提前终局凑不够手数；故最多重试 5 局，
+  // 取第一局达到 20 手的用于后续悔棋验证，消除偶发失败。
+  for (var attempt = 0; attempt < 5; attempt++) {
+    game = new Game();
+    startFen = game.pos.toFen();
+    snapshots = [startFen];
+    plies = 0;
+    captures = 0;
+    while (plies < 24 && !game.result) {
+      var r = AI.findBestMove(game.pos, { level: 'beginner' });
+      if (!r) break;
+      if (game.pos.board[r.to] !== C.EMPTY) captures++;
+      var res = game.move(r.from, r.to);
+      if (!res.ok) break;
+      plies++;
+      snapshots.push(game.pos.toFen());
+    }
+    if (plies >= 20) break;
   }
   console.log('        自我对弈 ' + plies + ' 手，吃子 ' + captures + ' 次');
   assert('推进了足够手数', plies >= 20, true);
@@ -345,12 +355,12 @@ console.log('\n[12] legalTargets 与状态摘要');
   assert('轮到红方', st.side, C.RED);
   assert('已走 2 手', st.ply, 2);
   assert('未结束', st.finished, false);
-  assert('记录最后一手', st.lastMove && st.lastMove.text, '马8进7');
+  assert('记录最后一手', st.lastMove && st.lastMove.text, '傌8进7');
   assert('FEN 与局面一致', st.fen, game.pos.toFen());
 
   var texts = game.moveTexts();
-  assert('着法文本序列', texts.join(','), '炮二平五,马8进7');
-  assert('回合排版', game.moveList()[0], '1. 炮二平五  马8进7');
+  assert('着法文本序列', texts.join(','), '炮二平五,傌8进7');
+  assert('回合排版', game.moveList()[0], '1. 炮二平五  傌8进7');
 })();
 
 console.log('\n[13] 将军标记');
@@ -359,7 +369,7 @@ console.log('\n[13] 将军标记');
   var game = new Game('4k4/9/9/9/9/9/9/9/4R4/4K4 w - - 0 1');
   var r = play(game, 4, 8, 4, 1);   // 红车直插将前
   assert('走法被接受', r.ok, true);
-  assert('记为将军', r.text, '車五进七将');
+  assert('记为将军', r.text, '俥五进七将');
   assert('isChecked 反映当前走子方被将军', game.isChecked(), true);
   assert('黑方仍有应将着法', MG.genLegalMoves(game.pos, C.BLACK).length > 0, true);
   assert('尚未终局', game.result, null);
@@ -430,11 +440,11 @@ console.log('\n[16] parseText 反解析');
   var legal = MG.genLegalMoves(pos, C.RED);
   assert('炮二平五', NT.parseText(pos, '炮二平五', legal),
     MG.packMove(C.idxOf(7, 7), C.idxOf(4, 7)));
-  assert('马二进三', NT.parseText(pos, '马二进三', legal),
+  assert('傌二进三', NT.parseText(pos, '傌二进三', legal),
     MG.packMove(C.idxOf(7, 9), C.idxOf(6, 7)));
   assert('兵七进一', NT.parseText(pos, '兵七进一', legal),
     MG.packMove(C.idxOf(2, 6), C.idxOf(2, 5)));
-  assert('不存在的着法返回 null', NT.parseText(pos, '車九进九', legal), null);
+  assert('不存在的着法返回 null', NT.parseText(pos, '俥九进九', legal), null);
   assert('空文本返回 null', NT.parseText(pos, '', legal), null);
 })();
 

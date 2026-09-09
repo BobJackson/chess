@@ -215,9 +215,9 @@ console.log('\n[5] 渲染初始局面：棋子文字完整');
   var texts = pieceTexts(calls).map(function (t) { return t[0]; });
   assert('绘制了 32 枚棋子', texts.length, 32);
 
-  var expect = ['帅', '仕', '仕', '相', '相', '马', '马', '車', '車', '炮', '炮',
+  var expect = ['帥', '仕', '仕', '相', '相', '傌', '傌', '俥', '俥', '炮', '炮',
     '兵', '兵', '兵', '兵', '兵',
-    '将', '士', '士', '象', '象', '马', '马', '車', '車', '炮', '炮',
+    '將', '士', '士', '象', '象', '傌', '傌', '車', '車', '砲', '砲',
     '卒', '卒', '卒', '卒', '卒'];
   var sortedActual = texts.slice(0).sort();
   var sortedExpect = expect.slice(0).sort();
@@ -253,14 +253,14 @@ console.log('\n[6] 翻转视角下棋子位置随之镜像');
   var findText = function (calls, ch) {
     return calls.fillText.filter(function (t) { return t[0] === ch; });
   };
-  var kings = findText(ctxB.calls, '帅');
+  var kings = findText(ctxB.calls, '帥');
   assert('翻转后仅一枚帅', kings.length, 1);
   approx('翻转后帅的横坐标不变（同列）', kings[0][1], flipped.xOf(idx), 0.01);
   approx('翻转后帅移到屏幕上方', kings[0][2], flipped.yOf(idx) + flipped.pieceRadius * 0.05, 0.01);
   assert('翻转后帅确实在上半屏', kings[0][2] < flipped.height / 2, true);
 
   // 未翻转时帅在下半屏
-  var kingsA = findText(ctxA.calls, '帅');
+  var kingsA = findText(ctxA.calls, '帥');
   assert('未翻转时帅在下半屏', kingsA[0][2] > normal.height / 2, true);
 })();
 
