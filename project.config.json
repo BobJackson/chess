@@ -1,7 +1,7 @@
 {
   "miniprogramRoot": "miniprogram/",
-  "compileType": "miniprogram",
-  "appid": "touristappid",
+  "compileType": "game",
+  "appid": "wxf65ba163cb5fd07c",
   "projectname": "wechat-chess",
   "setting": {
     "es6": true,
@@ -10,8 +10,31 @@
     "minified": true,
     "urlCheck": false,
     "coverView": true,
-    "showShadowRootInWxmlPanel": true
+    "showShadowRootInWxmlPanel": true,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
   },
   "libVersion": "2.30.0",
-  "condition": {}
+  "condition": {},
+  "simulatorPluginLibVersion": {},
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "isGameTourist": false,
+  "editorSetting": {}
 }
