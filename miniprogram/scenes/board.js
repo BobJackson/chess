@@ -16,6 +16,86 @@ var W = require('../ui/widgets.js');
 /** layout.height / layout.width 的固定比例（由 PADDING_RATIO 决定） */
 var BOARD_ASPECT = 10.24 / 9.24;
 
+// ---------------------------------------------------------------------------
+// 屏幕级装饰（美化棋盘上下的留白）
+// ---------------------------------------------------------------------------
+
+/** 整屏纵向渐变底色，比纯色更有"桌布"质感 */
+function drawScreenBg(ctx, w, h) {
+  var g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#f8eed9');
+  g.addColorStop(0.5, '#f1e2c2');
+  g.addColorStop(1, '#e6d2a8');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+}
+
+/** 棋盘衬底：一圈略大的"棋桌"面板 + 投影 + 内描边 */
+function drawPanel(ctx, x, y, w, h) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(93,64,55,0.28)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 5;
+  ctx.fillStyle = '#dcc08c';
+  W.roundRectPath(ctx, x, y, w, h, 14);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(93,64,55,0.35)';
+  ctx.lineWidth = 1;
+  W.roundRectPath(ctx, x + 4, y + 4, w - 8, h - 8, 10);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 中式分隔饰线：两端细线 + 中心菱形 */
+function drawOrnament(ctx, cx, cy, halfW) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(93,64,55,0.30)';
+  ctx.fillStyle = 'rgba(93,64,55,0.30)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW, cy); ctx.lineTo(cx - 9, cy);
+  ctx.moveTo(cx + 9, cy); ctx.lineTo(cx + halfW, cy);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - 4.5); ctx.lineTo(cx + 4.5, cy);
+  ctx.lineTo(cx, cy + 4.5); ctx.lineTo(cx - 4.5, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** 淡墨水印大字，填充大块留白 */
+function drawWatermark(ctx, cx, cy, ch, size) {
+  ctx.save();
+  ctx.globalAlpha = 0.055;
+  ctx.fillStyle = '#5d4037';
+  ctx.font = 'bold ' + size + 'px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ch, cx, cy);
+  ctx.restore();
+}
+
+/**
+ * 装饰一段留白区域 [y0, y1]：
+ * 空间足够时放一枚水印字 + 靠近棋盘一侧的饰线；空间较小只放居中饰线。
+ */
+function decorateGap(ctx, w, y0, y1, ch, ornamentNearY) {
+  var gap = y1 - y0;
+  if (gap < 26) return;
+  var cx = w / 2;
+  var halfW = Math.min(70, w * 0.2);
+  if (gap > 110) {
+    drawWatermark(ctx, cx, (y0 + y1) / 2 + 4, ch, Math.min(92, gap * 0.55));
+    drawOrnament(ctx, cx, ornamentNearY, halfW);
+  } else {
+    drawOrnament(ctx, cx, (y0 + y1) / 2, halfW);
+  }
+}
+
 function createBoardScene(app) {
   var scene = {
     name: 'board',
@@ -78,10 +158,17 @@ function createBoardScene(app) {
 
   scene.measure = function () {
     var w = app.w, h = app.h;
-    var availH = h - scene.statusH - scene.toolbarH - 8;
-    scene.boardWidth = Math.min(w, availH / BOARD_ASPECT);
+    // 可用区域：状态栏与工具栏之间
+    scene.areaTop = scene.statusH + 6;
+    scene.areaBottom = h - scene.toolbarH - 6;
+    var availH = scene.areaBottom - scene.areaTop;
+
+    // 侧边留出呼吸边距；高度受限时按可用高度缩放
+    scene.boardWidth = Math.min(w - 24, availH / BOARD_ASPECT);
+    scene.boardHeight = scene.boardWidth * BOARD_ASPECT;
     scene.boardX = (w - scene.boardWidth) / 2;
-    scene.boardTop = scene.statusH;
+    // 垂直居中：上下留白均分
+    scene.boardTop = scene.areaTop + Math.max(0, (availH - scene.boardHeight) / 2);
   };
 
   scene.buildToolbar = function () {
@@ -273,7 +360,16 @@ function createBoardScene(app) {
 
   scene.render = function (ctx, w, h) {
     scene.dirty = false;
-    W.fillBackground(ctx, w, h);
+    drawScreenBg(ctx, w, h);
+
+    var boardBottom = scene.boardTop + scene.boardHeight;
+
+    // 上下留白美化：上留白靠近棋盘处饰线 +「帥」水印；下留白「棋」水印 + 饰线
+    decorateGap(ctx, w, scene.areaTop, scene.boardTop, '帥', scene.boardTop - 20);
+    decorateGap(ctx, w, boardBottom, scene.areaBottom, '棋', boardBottom + 20);
+
+    // 棋盘衬底（棋桌面板）
+    drawPanel(ctx, scene.boardX - 8, scene.boardTop - 8, scene.boardWidth + 16, scene.boardHeight + 16);
 
     // 状态栏
     W.drawText(ctx, scene.modeLabel, 14, scene.statusH / 2, 12, W.THEME.subtitle);

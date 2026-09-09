@@ -139,6 +139,12 @@ console.log('\n[2] 人机对局：走子 + AI 应招 + 返回');
   assert('人机模式', b.mode, 'ai');
   truthy('controller 已创建', b.controller);
 
+  // 布局：棋盘在状态栏与工具栏之间垂直居中，且侧边有边距
+  var topGap = b.boardTop - b.areaTop;
+  var bottomGap = b.areaBottom - (b.boardTop + b.boardHeight);
+  assert('棋盘垂直居中（上下留白均分）', Math.abs(topGap - bottomGap) <= 1, true);
+  truthy('侧边留有边距', b.boardX >= 12);
+
   pump(32);
   truthy('棋盘已绘制', global.__canvas.ctx.calls.fillText.length > 0);
 
