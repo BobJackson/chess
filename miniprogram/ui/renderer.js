@@ -34,6 +34,13 @@ var THEME = {
   hint: 'rgba(30,136,229,0.92)'
 };
 
+/**
+ * 棋子/题字用的中文书法字栈
+ * iOS 命中 Kaiti SC / Songti SC，Android 回落到 Noto Serif CJK（宋体），
+ * 最终 serif 兜底，保证任何平台都是传统字形而非现代黑体。
+ */
+var PIECE_FONT = '"Kaiti SC", "STKaiti", "KaiTi", "Songti SC", "STSong", "Noto Serif CJK SC", serif';
+
 /** 需要画「准星」标记的交叉点：4 个炮位 + 10 个兵卒位 */
 var MARK_POINTS = [
   [1, 2], [7, 2], [1, 7], [7, 7],
@@ -159,7 +166,7 @@ function drawRiver(ctx, L) {
   var size = L.cell * 0.44;
   ctx.save();
   ctx.fillStyle = THEME.riverText;
-  ctx.font = 'bold ' + px(size) + 'px sans-serif';
+  ctx.font = px(size) + 'px ' + PIECE_FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('楚  河', L.width * 0.27, y);
@@ -215,7 +222,7 @@ function drawPieceAt(ctx, L, x, y, piece, opts) {
   ctx.stroke();
 
   ctx.fillStyle = isRed ? THEME.redText : THEME.blackText;
-  ctx.font = 'bold ' + px(r * 1.08) + 'px sans-serif';
+  ctx.font = 'bold ' + px(r * 1.08) + 'px ' + PIECE_FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(C.PIECE_NAMES[piece] || '?', x, y + r * 0.05);
@@ -381,6 +388,7 @@ function draw(ctx, L, state) {
 
 module.exports = {
   THEME: THEME,
+  PIECE_FONT: PIECE_FONT,
   MARK_POINTS: MARK_POINTS,
   draw: draw,
   drawBackground: drawBackground,

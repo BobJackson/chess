@@ -72,7 +72,7 @@ function drawWatermark(ctx, cx, cy, ch, size) {
   ctx.save();
   ctx.globalAlpha = 0.055;
   ctx.fillStyle = '#5d4037';
-  ctx.font = 'bold ' + size + 'px sans-serif';
+  ctx.font = 'bold ' + size + 'px ' + Renderer.PIECE_FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(ch, cx, cy);

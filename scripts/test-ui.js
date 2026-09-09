@@ -451,6 +451,30 @@ console.log('\n[12] 拖拽悬停落点高亮');
   approx('无悬停时最后一条弧为落点小圆点', dot[2], L.cell * 0.135);
 })();
 
+console.log('\n[13] 中文书法字栈');
+(function () {
+  var L = new Layout(375, false);
+  var ctx = createStubContext();
+  R.draw(ctx, L, { board: new Position().board });
+
+  // 棋子文字（单字）对应的 font 应为书法字栈
+  var pieceIdx = -1;
+  var i;
+  for (i = 0; i < ctx.calls.fillText.length; i++) {
+    if (ctx.calls.fillText[i][0].length === 1) { pieceIdx = i; break; }
+  }
+  assert('找到棋子文字', pieceIdx >= 0, true);
+  assert('棋子文字使用书法字栈', /Kaiti|Songti|serif/.test(ctx.calls.fonts[pieceIdx]), true);
+  assert('棋子文字不再用 sans-serif', ctx.calls.fonts[pieceIdx].indexOf('sans-serif') < 0, true);
+
+  // 楚河汉界（含空格）同样使用书法字栈
+  var riverIdx = -1;
+  for (i = 0; i < ctx.calls.fillText.length; i++) {
+    if (ctx.calls.fillText[i][0].indexOf(' ') >= 0) { riverIdx = i; break; }
+  }
+  assert('楚河汉界使用书法字栈', /Kaiti|Songti|serif/.test(ctx.calls.fonts[riverIdx]), true);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {
