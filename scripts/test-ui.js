@@ -215,9 +215,9 @@ console.log('\n[5] 渲染初始局面：棋子文字完整');
   var texts = pieceTexts(calls).map(function (t) { return t[0]; });
   assert('绘制了 32 枚棋子', texts.length, 32);
 
-  var expect = ['帅', '仕', '仕', '相', '相', '马', '马', '车', '车', '炮', '炮',
+  var expect = ['帅', '仕', '仕', '相', '相', '马', '马', '車', '車', '炮', '炮',
     '兵', '兵', '兵', '兵', '兵',
-    '将', '士', '士', '象', '象', '马', '马', '车', '车', '炮', '炮',
+    '将', '士', '士', '象', '象', '马', '马', '車', '車', '炮', '炮',
     '卒', '卒', '卒', '卒', '卒'];
   var sortedActual = texts.slice(0).sort();
   var sortedExpect = expect.slice(0).sort();

@@ -38,7 +38,7 @@ console.log('\n[1] 中文记谱：红方（汉字纵线号）');
   var pos = new Position();
   var cases = [
     [[7, 7], [4, 7], '炮二平五'],   // 中炮
-    [[8, 9], [8, 7], '车一进二'],   // 直线子进退记格数
+    [[8, 9], [8, 7], '車一进二'],   // 直线子进退记格数
     [[6, 9], [4, 7], '相三进五'],   // 斜线子进退记终点纵线号
     [[5, 9], [4, 8], '仕四进五'],
     [[4, 9], [4, 8], '帅五进一'],   // (3,9) 初始有己方仕，改用前进一格
@@ -69,7 +69,7 @@ console.log('\n[2] 中文记谱：黑方（阿拉伯纵线号）');
   var cases = [
     [[7, 0], [6, 2], '马8进7'],
     [[1, 0], [2, 2], '马2进3'],
-    [[0, 0], [0, 1], '车1进1'],   // 车在底线前进一格
+    [[0, 0], [0, 1], '車1进1'],   // 車在底线前进一格
     [[3, 0], [4, 1], '士4进5'],
     [[2, 3], [2, 4], '卒3进1'],
     [[4, 0], [4, 1], '将5进1'],   // 将帅只走直线，进退记格数
@@ -96,8 +96,8 @@ console.log('\n[3] 中文记谱：同纵线多子用「前/后/序号」');
 
   // 黑方双车同在 file 8：(8,0) 靠后、(8,4) 靠前（黑方向 rank 9 进攻）
   var pos2 = new Position('3k4r/9/9/9/8r/9/9/9/9/5K3 b - - 0 1');
-  assert('黑方前车', NT.moveText(pos2, C.idxOf(8, 4), C.idxOf(4, 4)), '前车平5');
-  assert('黑方后车', NT.moveText(pos2, C.idxOf(8, 0), C.idxOf(4, 0)), '后车平5');
+  assert('黑方前车', NT.moveText(pos2, C.idxOf(8, 4), C.idxOf(4, 4)), '前車平5');
+  assert('黑方后车', NT.moveText(pos2, C.idxOf(8, 0), C.idxOf(4, 0)), '后車平5');
 
   // 三枚同列红兵（file 0 的 rank 3/5/7，各能前进一格且不互挡）
   // 从前到后依次为：前、二、后
@@ -114,7 +114,7 @@ console.log('\n[4] 终局：将死');
   var r = play(game, 8, 5, 8, 0);
   assert('走法被接受', r.ok, true);
   console.log('        着法记谱: ' + r.text);
-  assert('记谱含绝杀标记', r.text, '车一进五绝杀');
+  assert('记谱含绝杀标记', r.text, '車一进五绝杀');
   assert('对局已结束', !!game.result, true);
   assert('胜方为红', game.result && game.result.winner, C.RED);
   assert('终局原因', game.result && game.result.reason, '将死');
@@ -359,7 +359,7 @@ console.log('\n[13] 将军标记');
   var game = new Game('4k4/9/9/9/9/9/9/9/4R4/4K4 w - - 0 1');
   var r = play(game, 4, 8, 4, 1);   // 红车直插将前
   assert('走法被接受', r.ok, true);
-  assert('记为将军', r.text, '车五进七将');
+  assert('记为将军', r.text, '車五进七将');
   assert('isChecked 反映当前走子方被将军', game.isChecked(), true);
   assert('黑方仍有应将着法', MG.genLegalMoves(game.pos, C.BLACK).length > 0, true);
   assert('尚未终局', game.result, null);
@@ -434,7 +434,7 @@ console.log('\n[16] parseText 反解析');
     MG.packMove(C.idxOf(7, 9), C.idxOf(6, 7)));
   assert('兵七进一', NT.parseText(pos, '兵七进一', legal),
     MG.packMove(C.idxOf(2, 6), C.idxOf(2, 5)));
-  assert('不存在的着法返回 null', NT.parseText(pos, '车九进九', legal), null);
+  assert('不存在的着法返回 null', NT.parseText(pos, '車九进九', legal), null);
   assert('空文本返回 null', NT.parseText(pos, '', legal), null);
 })();
 
