@@ -31,6 +31,10 @@ miniprogram/
     renderer.js              棋盘分层绘制（仅依赖 Canvas 2D）
     controller.js            触摸状态机：点选+拖拽、canMove 门控、renderState
     widgets.js               小游戏自绘 UI：按钮/分段/文本换行/命中测试
+    audio.js                 音频管理器：BGM loop + SFX 池 + 开关持久化
+  audio/
+    bgm.mp3                  中国风 BGM（64s 循环段，56kbps 单声道）
+    *.wav                    合成音效：落子/吃子/将军/胜/负/按钮/悔棋
   net/
     transport.js             传输接口约定 + 回环传输对（测试用）
     session.js               OnlineSession 房间状态机（与通道解耦）
@@ -59,17 +63,25 @@ miniprogram/
 
 联机协议见 `net/session.js`：`join/welcome/move/stateReq/state/result/bye`；走法只传 `(from,to,ply)` 本地校验重放，乱序自动全量重同步，同 `clientId` 重加入即断线重连。
 
+## 音频与沉浸感
+
+- **BGM**：`audio/bgm.mp3`，中国风古筝/箫氛围循环段；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。
+- **音效**：`audio/*.wav` 由 `npm run gen:sfx`（`scripts/gen-sfx.js`）纯数学合成，无外部素材——落子木质"笃"、吃子闷响、将军两声警示钟、胜/负五声琶音与低锣、按钮轻击、悔棋上挑。
+- **触发点**：落子/吃子/将军/终局/工具栏/菜单/大厅按钮；菜单提供「音乐」「音效」独立开关，与静音状态一起用 `wx.setStorageSync` 持久化。
+- 重新生成音效：`npm run gen:sfx`；替换 BGM 只需覆盖 `audio/bgm.mp3`（建议 ≤64s、单声道 ≤64kbps 以控制包体）。
+
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 541 项
+npm test                 # 串联全部，当前 570 项
 npm run test:engine      # 引擎 61
 npm run test:ai          # AI 24
 npm run test:game        # 对局 117
-npm run test:ui          # 布局/渲染 93
+npm run test:ui          # 布局/渲染 97
 npm run test:controller  # 触摸状态机 171
 npm run test:net         # 联机会话 41
-npm run test:page        # 小游戏接线冒烟 34（桩 wx.createCanvas/全局触摸/软键盘）
+npm run test:audio       # 音频管理器 23
+npm run test:page        # 小游戏接线冒烟 36（桩 wx.createCanvas/全局触摸/软键盘）
 ```
 
 ## 操作

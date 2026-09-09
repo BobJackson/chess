@@ -31,6 +31,14 @@ function createMenuScene(app) {
       W.makeButton('online', pad, y + (bh + gap) * 2, bw, bh, '好友联机'),
       W.makeButton('rules', pad, y + (bh + gap) * 3, bw, bh, '查看规则', 'ghost')
     ];
+
+    // 音乐 / 音效开关（标签随状态在 render 中动态填充）
+    var ty = y + (bh + gap) * 4 - gap + 12;
+    var tw = (bw - 12) / 2;
+    scene.toggles = [
+      W.makeButton('bgm', pad, ty, tw, 36, '', 'ghost'),
+      W.makeButton('sfx', pad + tw + 12, ty, tw, 36, '', 'ghost')
+    ];
   };
 
   scene.onTouch = function (type, x, y) {
@@ -41,10 +49,12 @@ function createMenuScene(app) {
       var idx = W.hitSegmented(scene.seg.x, scene.seg.y, scene.seg.w, scene.seg.h, scene.levels, x, y);
       if (idx >= 0) {
         app.difficulty = AI.LEVEL_ORDER[idx];
+        app.audio.play('tap');
         return;
       }
-      for (var i = 0; i < scene.buttons.length; i++) {
-        if (W.hitButton(scene.buttons[i], x, y)) { scene.pressed = scene.buttons[i].id; return; }
+      var all = scene.buttons.concat(scene.toggles);
+      for (var i = 0; i < all.length; i++) {
+        if (W.hitButton(all[i], x, y)) { scene.pressed = all[i].id; return; }
       }
       return;
     }
@@ -53,9 +63,24 @@ function createMenuScene(app) {
     var id = scene.pressed;
     scene.pressed = null;
     if (!id) return;
+
+    // 开关类
+    if (id === 'bgm' || id === 'sfx') {
+      for (var t = 0; t < scene.toggles.length; t++) {
+        if (scene.toggles[t].id === id && W.hitButton(scene.toggles[t], x, y)) {
+          if (id === 'bgm') app.audio.setBgmOn(!app.audio.bgmOn);
+          else app.audio.setSfxOn(!app.audio.sfxOn);
+          app.audio.play('tap');
+          return;
+        }
+      }
+      return;
+    }
+
     for (var b = 0; b < scene.buttons.length; b++) {
       var btn = scene.buttons[b];
       if (btn.id === id && W.hitButton(btn, x, y)) {
+        app.audio.play('tap');
         if (id === 'ai') app.go('board', { mode: 'ai' });
         else if (id === 'local') app.go('board', { mode: 'local' });
         else if (id === 'online') app.go('lobby');
@@ -76,6 +101,13 @@ function createMenuScene(app) {
 
     for (var i = 0; i < scene.buttons.length; i++) {
       W.drawButton(ctx, scene.buttons[i], scene.pressed === scene.buttons[i].id);
+    }
+
+    // 开关按钮：标签反映当前状态
+    scene.toggles[0].label = '音乐 ' + (app.audio.bgmOn ? '开' : '关');
+    scene.toggles[1].label = '音效 ' + (app.audio.sfxOn ? '开' : '关');
+    for (var g = 0; g < scene.toggles.length; g++) {
+      W.drawButton(ctx, scene.toggles[g], scene.pressed === scene.toggles[g].id);
     }
     W.drawText(ctx, '人机与本地双人纯本地运行 · 联机需云开发', w / 2, h - 24, 11, W.THEME.subtitle, 'center');
   };

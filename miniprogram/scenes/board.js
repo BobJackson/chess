@@ -196,6 +196,7 @@ function createBoardScene(app) {
   scene.onMoved = function (res) {
     scene.dirty = true;
     scene.refreshStatus();
+    scene.sfxMove(res);
     if (scene.mode === 'online' && res && res.entry) {
       scene.session.broadcastMove(res.entry.from, res.entry.to);
       if (scene.game.result) scene.showResult();
@@ -209,13 +210,21 @@ function createBoardScene(app) {
   scene.onSelect = function () { scene.dirty = true; };
   scene.onCapture = function () { if (wx.vibrateShort) wx.vibrateShort({ type: 'light' }); };
 
+  /** 一步棋的音效：落子/吃子 + 将军警示 */
+  scene.sfxMove = function (res) {
+    var cap = res && res.entry && res.entry.captured !== C.EMPTY;
+    app.audio.play(cap ? 'capture' : 'move');
+    if (!scene.game.result && scene.game.isChecked()) app.audio.play('check');
+  };
+
   // -------------------------------------------------------------------------
   // 联机事件
 
   scene.bindSession = function () {
     var o = scene.session.options;
-    o.onRemoteMove = function () {
+    o.onRemoteMove = function (res) {
       scene.dirty = true; scene.refreshStatus();
+      scene.sfxMove(res);
       if (scene.game.result) scene.showResult();
     };
     o.onResync = function (game) {
@@ -272,6 +281,8 @@ function createBoardScene(app) {
   };
 
   scene.showResult = function () {
+    var win = scene.mode === 'local' ? true : (scene.game.result.winner === scene.humanSide);
+    app.audio.play(win ? 'win' : 'lose');
     wx.showModal({ title: '对局结束', content: scene.game.result.text, showCancel: false, confirmText: '知道了' });
   };
 
@@ -311,6 +322,8 @@ function createBoardScene(app) {
   };
 
   scene.toolAction = function (id) {
+    if (id === 'undo') app.audio.play('undo');
+    else app.audio.play('tap');
     if (id === 'back') { scene.leave(); app.go('menu'); return; }
     if (id === 'undo') {
       if (scene.mode === 'online') { app.toast('联机不可悔棋'); return; }

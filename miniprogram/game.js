@@ -14,6 +14,9 @@ var createMenu = require('./scenes/menu.js');
 var createBoard = require('./scenes/board.js');
 var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
+var audio = require('./ui/audio.js');
+
+audio.init();
 
 // ---------------------------------------------------------------------------
 // 画布与尺寸
@@ -42,6 +45,7 @@ var app = {
   session: null,
   transport: null,
   cloudReady: false,
+  audio: audio,
 
   go: function (name, params) { return manager.show(name, params); },
 
@@ -89,7 +93,16 @@ if (wx.cloud && wx.cloud.init) {
 var manager = new Manager(app);
 manager.show('menu');
 
+// iOS 要求用户首次交互后才能出声：第一次触摸时启动 BGM
+var bgmStarted = false;
+function ensureBgm() {
+  if (bgmStarted) return;
+  bgmStarted = true;
+  audio.startBgm();
+}
+
 wx.onTouchStart(function (e) {
+  ensureBgm();
   var t = e.touches && e.touches[0];
   if (t) manager.touch('start', t.clientX, t.clientY);
 });
@@ -104,6 +117,10 @@ wx.onTouchEnd(function (e) {
 wx.onTouchCancel(function () {
   manager.touch('cancel', 0, 0);
 });
+
+// 前后台切换：暂停/恢复 BGM，省电也避免回前台双音
+if (wx.onShow) wx.onShow(function () { audio.resumeBgm(); });
+if (wx.onHide) wx.onHide(function () { audio.pauseBgm(); });
 
 var last = 0;
 function frame(ts) {

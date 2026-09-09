@@ -146,6 +146,7 @@ function createLobbyScene(app) {
     for (var k = 0; k < scene.buttons.length; k++) {
       var btn = scene.buttons[k];
       if (btn.id === id && W.hitButton(btn, x, y)) {
+        app.audio.play('tap');
         if (id === 'create') scene.onCreate();
         else if (id === 'join') scene.onJoin();
         else if (id === 'back') app.go('menu');
