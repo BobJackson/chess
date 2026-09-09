@@ -46,8 +46,19 @@ var app = {
   transport: null,
   cloudReady: false,
   audio: audio,
+  pendingRoom: null,
 
   go: function (name, params) { return manager.show(name, params); },
+
+  /** 分享邀请卡片：好友点开后带 query.room 直接进入大厅加入 */
+  shareRoom: function (code) {
+    if (!wx.shareAppMessage) return false;
+    wx.shareAppMessage({
+      title: '来和我下盘中国象棋 · 房间 ' + code,
+      query: 'room=' + code
+    });
+    return true;
+  },
 
   toast: function (msg) {
     wx.showToast({ title: msg, icon: 'none' });
@@ -118,8 +129,18 @@ wx.onTouchCancel(function () {
   manager.touch('cancel', 0, 0);
 });
 
-// 前后台切换：暂停/恢复 BGM，省电也避免回前台双音
-if (wx.onShow) wx.onShow(function () { audio.resumeBgm(); });
+// 前后台切换：暂停/恢复 BGM；并捕获分享卡片带来的房间号自动加入
+if (wx.onShow) wx.onShow(function (res) {
+  audio.resumeBgm();
+  var q = res && res.query;
+  if (q && q.room) {
+    app.pendingRoom = String(q.room).toUpperCase();
+    var cur = manager.current;
+    if (!cur || (cur.name !== 'board' && cur.name !== 'lobby')) {
+      manager.show('lobby', { room: app.pendingRoom });
+    }
+  }
+});
 if (wx.onHide) wx.onHide(function () { audio.pauseBgm(); });
 
 var last = 0;

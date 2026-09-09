@@ -51,6 +51,13 @@ CloudTransport.prototype.roomExists = function (code) {
     .catch(function () { return false; });
 };
 
+/** 删除房间登记（房主退出时调用，避免垃圾房间堆积） */
+CloudTransport.prototype.removeRoom = function (code) {
+  return this.db.collection(ROOMS).doc(code).remove()
+    .then(function () { return true; })
+    .catch(function () { return false; });
+};
+
 /** 开始监听房间消息流 */
 CloudTransport.prototype.attach = function (room) {
   var self = this;

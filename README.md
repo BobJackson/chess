@@ -60,6 +60,8 @@ miniprogram/
 2. 创建集合 `chess_rooms`（`_id` 为房间号，`{creator,createdAt}`）与 `chess_msgs`（`{room,clientId,type,...}`），权限「所有用户可读写」。
 3. 多环境时在 `game.js` 的 `wx.cloud.init({ env:'环境ID' })` 指定。
 4. 一方「创建房间」得 4 位房间号 → 另一方输入加入 → 建房者执红。
+5. **邀请好友**：等待态点「邀请好友」生成微信分享卡片（`query=room=房间号`）；好友点卡片启动时 `onShow` 捕获房间号，自动进大厅加入并直接进入对局，无需手输。
+6. 房主「取消房间」或退出时会删除房间登记（`removeRoom`），避免垃圾房间堆积；建房遇房号冲突自动换号重试（最多 3 次）。
 
 联机协议见 `net/session.js`：`join/welcome/move/stateReq/state/result/bye`；走法只传 `(from,to,ply)` 本地校验重放，乱序自动全量重同步，同 `clientId` 重加入即断线重连。
 
@@ -73,15 +75,16 @@ miniprogram/
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 570 项
+npm test                 # 串联全部，当前 604 项
 npm run test:engine      # 引擎 61
 npm run test:ai          # AI 24
 npm run test:game        # 对局 117
 npm run test:ui          # 布局/渲染 97
 npm run test:controller  # 触摸状态机 171
-npm run test:net         # 联机会话 41
+npm run test:net         # 联机会话（回环）41
+npm run test:cloud       # 云适配器集成（内存假云）21
 npm run test:audio       # 音频管理器 23
-npm run test:page        # 小游戏接线冒烟 36（桩 wx.createCanvas/全局触摸/软键盘）
+npm run test:page        # 小游戏接线冒烟（含邀请回流）49
 ```
 
 ## 操作

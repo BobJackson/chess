@@ -12,6 +12,7 @@
 var path = require('path');
 
 var OnlineSession = require('../miniprogram/net/session.js');
+var CloudTransport = require('../miniprogram/net/cloud-transport.js');
 var NT = require('../miniprogram/net/transport.js');
 
 var passed = 0;
@@ -62,7 +63,73 @@ var touchHandlers = {};
 var keyboardHandlers = {};
 var shownModals = [];
 var shownToasts = [];
+var sharedCards = [];
+var showHandlers = [];
 var keyboardShown = 0;
+
+/** 同步 thenable：让 promise 链在当前同步流程内执行，便于断言 */
+function syncPromise(value, reject) {
+  var p = {
+    then: function (cb) { if (!reject && cb) cb(value); return p; },
+    catch: function (cb) { if (reject && cb) cb(new Error('stub')); return p; }
+  };
+  return p;
+}
+
+/** 内存假云：rooms + msgs + watch 广播总线（与 test-cloud 同构的精简版） */
+function createFakeCloud() {
+  var rooms = {};
+  var msgs = [];
+  var watchers = [];
+  var seq = 0;
+  function notify(room) {
+    watchers.slice().forEach(function (w) {
+      if (w.room === room && w.onChange) {
+        w.onChange({ type: 'queue', docs: msgs.filter(function (m) { return m.room === room; }) });
+      }
+    });
+  }
+  return {
+    rooms: rooms,
+    db: {
+      collection: function (name) {
+        if (name === 'chess_rooms') {
+          return {
+            add: function (arg) {
+              var d = arg.data;
+              if (rooms[d._id]) return syncPromise(null, true);
+              rooms[d._id] = d;
+              return syncPromise({ _id: d._id }, false);
+            },
+            doc: function (id) {
+              return {
+                get: function () { return rooms[id] ? syncPromise({ data: rooms[id] }, false) : syncPromise(null, true); },
+                remove: function () { if (rooms[id]) delete rooms[id]; return syncPromise({}, false); }
+              };
+            }
+          };
+        }
+        return {
+          add: function (arg) {
+            var d = arg.data; d._id = 'm' + (++seq); msgs.push(d); notify(d.room);
+            return syncPromise({ _id: d._id }, false);
+          },
+          where: function (q) {
+            return {
+              watch: function (handlers) {
+                var w = { room: q.room, onChange: handlers.onChange };
+                watchers.push(w);
+                handlers.onChange({ type: 'init', docs: msgs.filter(function (m) { return m.room === q.room; }) });
+                return { close: function () { var i = watchers.indexOf(w); if (i >= 0) watchers.splice(i, 1); } };
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+}
+var fakeCloud = createFakeCloud();
 
 global.wx = {
   getSystemInfoSync: function () { return { windowWidth: 375, windowHeight: 667, pixelRatio: 2 }; },
@@ -88,7 +155,11 @@ global.wx = {
   onKeyboardInput: function (cb) { keyboardHandlers.input = cb; },
   onKeyboardComplete: function (cb) { keyboardHandlers.complete = cb; },
   offKeyboardInput: function () {},
-  offKeyboardComplete: function () {}
+  offKeyboardComplete: function () {},
+  shareAppMessage: function (o) { sharedCards.push(o); },
+  onShow: function (cb) { showHandlers.push(cb); },
+  onHide: function () {},
+  cloud: { database: function () { return fakeCloud.db; }, init: function () {} }
 };
 global.setTimeout = function (fn) { fn(); return 0; };
 
@@ -182,7 +253,7 @@ console.log('\n[3] 规则场景：滚动与返回');
   assert('返回菜单', manager.current.name, 'menu');
 })();
 
-console.log('\n[4] 联机大厅：软键盘录入房间号');
+console.log('\n[4] 联机大厅：建房/邀请/取消');
 (function () {
   var c = buttonCenter(manager.current, 'online');
   tap(c.x, c.y);
@@ -195,9 +266,25 @@ console.log('\n[4] 联机大厅：软键盘录入房间号');
   keyboardHandlers.input({ value: 'ab12' });
   assert('键盘输入写入并转大写', l.code, 'AB12');
 
-  // 云未就绪时创建/加入应提示而非崩溃
-  l.onCreate();
-  truthy('云未就绪给出提示', shownToasts.indexOf('云开发未就绪') >= 0);
+  // 建房（假云）→ 等待态，按钮切换为 邀请/取消/返回
+  var createBtn = buttonCenter(l, 'create');
+  tap(createBtn.x, createBtn.y);
+  assert('建房后进入等待', l.session.state, 'waiting');
+  assert('按钮切换为邀请', l.buttons[0].id, 'invite');
+  truthy('房间文档已登记', !!fakeCloud.rooms[l.session.room]);
+
+  // 邀请好友：分享卡片带房间号
+  var inv = buttonCenter(l, 'invite');
+  tap(inv.x, inv.y);
+  assert('分享卡片已生成', sharedCards.length, 1);
+  assert('卡片 query 带房间号', sharedCards[0].query, 'room=' + l.session.room);
+
+  // 取消房间：回 idle 且房主清理房间文档
+  var code = l.session.room;
+  var cancel = buttonCenter(l, 'cancel');
+  tap(cancel.x, cancel.y);
+  assert('取消后回 idle', l.buttons[0].id, 'create');
+  truthy('房间文档已清理', !fakeCloud.rooms[code]);
 
   var back = buttonCenter(l, 'back');
   tap(back.x, back.y);
@@ -237,6 +324,31 @@ console.log('\n[5] 联机对局：回环双会话同步与退出清理');
   assert('对手收到离开通知', guest.opponentConnected, false);
   assert('全局会话已清理', app.session, null);
   assert('返回菜单', manager.current.name, 'menu');
+})();
+
+console.log('\n[6] 分享回流：好友点卡片自动加入');
+(function () {
+  // 先有一个房主在 QQ88 等待
+  fakeCloud.rooms['QQ88'] = { _id: 'QQ88', creator: 'hostX', createdAt: 1 };
+  var ht = new CloudTransport({ clientId: 'hostX' });
+  ht.attach('QQ88');
+  var host = new OnlineSession(ht, { clientId: 'hostX' });
+  host.createRoom('QQ88');
+  assert('房主等待中', host.state, 'waiting');
+
+  // 好友点开分享卡片：onShow 带 query.room，自动进大厅并加入
+  truthy('onShow 已注册', showHandlers.length >= 1);
+  showHandlers[showHandlers.length - 1]({ query: { room: 'qq88' } });
+  assert('自动进入对局', manager.current.name, 'board');
+  assert('对局为联机模式', manager.current.mode, 'online');
+  assert('房主侧进入对局', host.state, 'playing');
+
+  // 退出：通知房主并清理
+  var b = manager.current;
+  var back = centerOf(b.toolbar[4]);
+  tap(back.x, back.y);
+  assert('回到菜单', manager.current.name, 'menu');
+  assert('房主收到离开通知', host.opponentConnected, false);
 })();
 
 console.log('\n----------------------------------------');
