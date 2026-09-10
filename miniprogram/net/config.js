@@ -12,5 +12,5 @@
  */
 module.exports = {
   kind: 'ws',
-  wsUrl: 'wss://your-domain.example/ws'
+  wsUrl: 'wss://chess.wangyousong.com/ws'
 };

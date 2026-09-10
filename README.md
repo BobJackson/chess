@@ -75,7 +75,7 @@ miniprogram/
 有备案域名与服务器时，可改用自建 WebSocket 中继，**零云开发费用**：
 
 1. **部署中继**：把 `server/` 目录上传服务器，`node room-server.js 8787`（零第三方依赖；建议 pm2/systemd 守护）。
-2. **nginx 反代 wss**（证书用你已有的）：
+2. **nginx 反代 wss**（证书用你已有的）：仓库已提供现成配置 `deploy/nginx/chess.wangyousong.com.conf`（含 80→443 跳转、`/ws` 升级头与长超时、`/healthz` 健康检查），拷贝到 `/etc/nginx/conf.d/` 后 `nginx -t && nginx -s reload`。手动配置参考：
    ```nginx
    location /ws {
      proxy_pass http://127.0.0.1:8787;
@@ -85,10 +85,10 @@ miniprogram/
      proxy_read_timeout 3600s;
    }
    ```
-3. **mp 控制台**：「开发设置 → 服务器域名 → socket 合法域名」添加 `wss://你的域名`。
-4. **切换通道**：编辑 `miniprogram/net/config.js`：
+3. **mp 控制台**：「开发设置 → 服务器域名 → socket 合法域名」添加 `wss://chess.wangyousong.com`。
+4. **切换通道**：编辑 `miniprogram/net/config.js`（当前已配置为真实域名）：
    ```js
-   module.exports = { kind: 'ws', wsUrl: 'wss://你的域名/ws' };
+   module.exports = { kind: 'ws', wsUrl: 'wss://chess.wangyousong.com/ws' };
    ```
    `kind: 'cloud'` 则走微信云开发。大厅/对局代码无需改动（传输工厂按配置选择适配器）。
 5. 服务端只做**按房间广播中继**（握手 URL `?room=` 登记房间），不解析棋局、不做裁判；校验与重同步均在客户端 `net/session.js` 完成。
