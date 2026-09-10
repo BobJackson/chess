@@ -13,7 +13,7 @@ var crypto = require('crypto');
 var url = require('url');
 var Relay = require('./relay.js');
 
-var PORT = parseInt(process.argv[2], 10) || 8787;
+var PORT = parseInt(process.env.PORT, 10) || parseInt(process.argv[2], 10) || 8787;
 var MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 var relay = new Relay();

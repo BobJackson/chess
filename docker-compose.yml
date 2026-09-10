@@ -1,0 +1,12 @@
+# 联机中继容器编排（在仓库根目录执行 docker compose up -d）
+# 端口只绑定 127.0.0.1：对外由宿主 nginx 以 wss 反代 /ws，不直接暴露容器端口
+services:
+  chess-room:
+    build: ./server
+    image: chess-room:latest
+    container_name: chess-room
+    restart: unless-stopped
+    environment:
+      - PORT=8787
+    ports:
+      - "127.0.0.1:8787:8787"

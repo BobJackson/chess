@@ -93,6 +93,22 @@ miniprogram/
    `kind: 'cloud'` 则走微信云开发。大厅/对局代码无需改动（传输工厂按配置选择适配器）。
 5. 服务端只做**按房间广播中继**（握手 URL `?room=` 登记房间），不解析棋局、不做裁判；校验与重同步均在客户端 `net/session.js` 完成。
 
+### Docker 部署（服务器已有 Docker 时推荐）
+
+```bash
+docker build -t chess-room ./server
+docker run -d --name chess-room --restart unless-stopped -p 127.0.0.1:8787:8787 chess-room
+# 或用编排（仓库根目录）
+docker compose up -d
+```
+
+- 镜像基于 `node:20-alpine`、仅复制两个运行文件、以非 root 用户运行；端口经 `PORT` 环境变量配置（默认 8787）
+- 端口只绑定 `127.0.0.1`，对外仍由 nginx 以 `wss://你的域名/ws` 反代（见上）
+- 部署后冒烟验证（两个裸 WS 客户端验证同房间广播与跨房间隔离）：
+  ```bash
+  npm run smoke:ws            # 默认连 ws://127.0.0.1:18787/ws，可传参改地址
+  ```
+
 ## 音频与沉浸感
 
 - **BGM**：`audio/bgm.mp3`，中国风古筝/箫氛围循环段；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。

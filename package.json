@@ -13,6 +13,7 @@
     "test:net": "node scripts/test-net.js",
     "test:cloud": "node scripts/test-cloud.js",
     "test:ws": "node scripts/test-ws.js",
+    "smoke:ws": "node scripts/ws-smoke.js",
     "test:audio": "node scripts/test-audio.js",
     "test:page": "node scripts/test-page.js",
     "gen:sfx": "node scripts/gen-sfx.js"
