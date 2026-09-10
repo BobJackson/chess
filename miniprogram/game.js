@@ -15,6 +15,7 @@ var createBoard = require('./scenes/board.js');
 var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
 var audio = require('./ui/audio.js');
+var NET_CONFIG = require('./net/config.js');
 
 audio.init();
 
@@ -88,14 +89,21 @@ var app = {
   }
 };
 
-// 云开发初始化（联机需要）；失败不影响本地玩法
-if (wx.cloud && wx.cloud.init) {
-  try {
-    wx.cloud.init({ traceUser: true });
-    app.cloudReady = true;
-  } catch (e) {
-    app.cloudReady = false;
+// 联机通道初始化：ws 自建服务器 / cloud 云开发（见 net/config.js）
+app.netKind = NET_CONFIG.kind;
+if (NET_CONFIG.kind === 'cloud') {
+  if (wx.cloud && wx.cloud.init) {
+    try {
+      wx.cloud.init({ traceUser: true });
+      app.cloudReady = true;
+    } catch (e) {
+      app.cloudReady = false;
+    }
   }
+  app.netReady = !!app.cloudReady;
+} else {
+  // ws 通道：要求配置了 wss 地址
+  app.netReady = !!NET_CONFIG.wsUrl && NET_CONFIG.wsUrl.indexOf('wss://') === 0;
 }
 
 // ---------------------------------------------------------------------------

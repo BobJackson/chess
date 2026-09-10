@@ -7,6 +7,8 @@
 var OnlineSession = require('../net/session.js');
 var NT = require('../net/transport.js');
 var CloudTransport = require('../net/cloud-transport.js');
+var WsTransport = require('../net/ws-transport.js');
+var NET_CONFIG = require('../net/config.js');
 var W = require('../ui/widgets.js');
 
 function createLobbyScene(app) {
@@ -113,21 +115,43 @@ function createLobbyScene(app) {
     scene.myCode = s.room || '';
   };
 
-  /** 建房：房间号冲突时换号重试（最多 3 次） */
+  /** 按 net/config.js 的 kind 创建传输（ws 自建服务器 / cloud 云开发） */
+  scene.makeTransport = function () {
+    var clientId = NT.randomClientId();
+    if (NET_CONFIG.kind === 'ws') {
+      return new WsTransport({ clientId: clientId, url: NET_CONFIG.wsUrl });
+    }
+    return new CloudTransport({ clientId: clientId });
+  };
+
+  /** 建房：ws 通道无需登记文档；cloud 通道登记并冲突换号重试（最多 3 次） */
   scene.onCreate = function () {
-    if (!app.cloudReady) { app.toast('云开发未就绪'); return; }
+    if (!app.netReady) { app.toast('联机通道未配置'); return; }
     if (scene.busy) return;
     scene.busy = true;
-    var transport = new CloudTransport({ clientId: NT.randomClientId() });
+    var transport = scene.makeTransport();
+    var code = NT.randomRoomCode();
+
+    if (NET_CONFIG.kind === 'ws') {
+      transport.attach(code);
+      var s = scene.makeSession(transport);
+      scene.isCreator = true;
+      scene.createdCode = code;
+      s.createRoom(code);
+      scene.refresh();
+      scene.busy = false;
+      return;
+    }
+
     var attempt = 0;
     function tryCreate() {
-      var code = NT.randomRoomCode();
-      transport.createRoomDoc(code).then(function () {
-        transport.attach(code);
+      var c = NT.randomRoomCode();
+      transport.createRoomDoc(c).then(function () {
+        transport.attach(c);
         var session = scene.makeSession(transport);
         scene.isCreator = true;
-        scene.createdCode = code;
-        session.createRoom(code);
+        scene.createdCode = c;
+        session.createRoom(c);
         scene.refresh();
         scene.busy = false;
       }).catch(function () {
@@ -143,12 +167,22 @@ function createLobbyScene(app) {
   };
 
   scene.onJoin = function () {
-    if (!app.cloudReady) { app.toast('云开发未就绪'); return; }
+    if (!app.netReady) { app.toast('联机通道未配置'); return; }
     if (!scene.code) { app.toast('请输入房间号'); return; }
     if (scene.busy) return;
     scene.busy = true;
-    var transport = new CloudTransport({ clientId: NT.randomClientId() });
+    var transport = scene.makeTransport();
     var code = scene.code;
+
+    if (NET_CONFIG.kind === 'ws') {
+      transport.attach(code);
+      var s = scene.makeSession(transport);
+      s.joinRoom(code);
+      scene.refresh();
+      scene.busy = false;
+      return;
+    }
+
     transport.roomExists(code).then(function (ok) {
       if (!ok) { scene.busy = false; app.toast('房间不存在'); return; }
       transport.attach(code);

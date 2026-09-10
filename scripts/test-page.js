@@ -15,6 +15,9 @@ var OnlineSession = require('../miniprogram/net/session.js');
 var CloudTransport = require('../miniprogram/net/cloud-transport.js');
 var NT = require('../miniprogram/net/transport.js');
 
+// 本测试的假云总线基于 CloudTransport，故把通道配置切到 cloud（ws 通道见 test-ws.js）
+require('../miniprogram/net/config.js').kind = 'cloud';
+
 var passed = 0;
 var failed = 0;
 

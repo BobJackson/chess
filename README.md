@@ -21,7 +21,10 @@
 ```
 project.config.json          compileType = "game"
 package.json                 测试脚本入口（npm test）
-scripts/                     node 测试（每层一个 test-*.js）
+scripts/                     node 测试（每层一个 test-*.js）+ 音效合成 gen-sfx.js
+server/                      自建联机中继（零依赖 Node WebSocket）
+  relay.js                   房间中继纯逻辑（可单测）
+  room-server.js             WS 服务端：握手 ?room= 登记 + 按房间广播
 miniprogram/
   game.js                    入口：Canvas/dpr、全局触摸、rAF 主循环、云初始化、场景调度
   game.json                  小游戏配置（竖屏等）
@@ -39,6 +42,8 @@ miniprogram/
     transport.js             传输接口约定 + 回环传输对（测试用）
     session.js               OnlineSession 房间状态机（与通道解耦）
     cloud-transport.js       云开发 database watch 适配器
+    ws-transport.js          自建 WebSocket 适配器（wx.connectSocket）
+    config.js                通道开关：kind 'ws'（免费自建）/ 'cloud'（云开发）
   scenes/
     manager.js               场景状态机（替代路由）
     menu.js                  主菜单：难度分段 + 三模式入口
@@ -65,6 +70,29 @@ miniprogram/
 
 联机协议见 `net/session.js`：`join/welcome/move/stateReq/state/result/bye`；走法只传 `(from,to,ply)` 本地校验重放，乱序自动全量重同步，同 `clientId` 重加入即断线重连。
 
+## 自建服务器联机（免云开发费用）
+
+有备案域名与服务器时，可改用自建 WebSocket 中继，**零云开发费用**：
+
+1. **部署中继**：把 `server/` 目录上传服务器，`node room-server.js 8787`（零第三方依赖；建议 pm2/systemd 守护）。
+2. **nginx 反代 wss**（证书用你已有的）：
+   ```nginx
+   location /ws {
+     proxy_pass http://127.0.0.1:8787;
+     proxy_http_version 1.1;
+     proxy_set_header Upgrade $http_upgrade;
+     proxy_set_header Connection "upgrade";
+     proxy_read_timeout 3600s;
+   }
+   ```
+3. **mp 控制台**：「开发设置 → 服务器域名 → socket 合法域名」添加 `wss://你的域名`。
+4. **切换通道**：编辑 `miniprogram/net/config.js`：
+   ```js
+   module.exports = { kind: 'ws', wsUrl: 'wss://你的域名/ws' };
+   ```
+   `kind: 'cloud'` 则走微信云开发。大厅/对局代码无需改动（传输工厂按配置选择适配器）。
+5. 服务端只做**按房间广播中继**（握手 URL `?room=` 登记房间），不解析棋局、不做裁判；校验与重同步均在客户端 `net/session.js` 完成。
+
 ## 音频与沉浸感
 
 - **BGM**：`audio/bgm.mp3`，中国风古筝/箫氛围循环段；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。
@@ -75,7 +103,7 @@ miniprogram/
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 604 项
+npm test                 # 串联全部，当前 626 项
 npm run test:engine      # 引擎 61
 npm run test:ai          # AI 24
 npm run test:game        # 对局 117
@@ -83,6 +111,7 @@ npm run test:ui          # 布局/渲染 97
 npm run test:controller  # 触摸状态机 171
 npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21
+npm run test:ws          # 自建 WS 通道（relay+适配器+假服务端）22
 npm run test:audio       # 音频管理器 23
 npm run test:page        # 小游戏接线冒烟（含邀请回流）49
 ```
