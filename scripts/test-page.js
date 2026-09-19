@@ -135,6 +135,20 @@ function createFakeCloud() {
 }
 var fakeCloud = createFakeCloud();
 
+/** 记录所有被播放的音频源，用于验证绝杀语音确实被请求 */
+var audioSrcs = [];
+
+function makeAudioCtx() {
+  var c = {
+    src: '', loop: false, volume: 1, currentTime: 0, plays: 0,
+    play: function () { c.plays++; audioSrcs.push(c.src); },
+    pause: function () {},
+    stop: function () {},
+    onEnded: function () {}
+  };
+  return c;
+}
+
 global.wx = {
   getSystemInfoSync: function () { return { windowWidth: 375, windowHeight: 667, pixelRatio: 2 }; },
   createCanvas: function () {
@@ -165,6 +179,7 @@ global.wx = {
   onShareAppMessage: function (cb) { menuShareHandler = cb; },
   onShow: function (cb) { showHandlers.push(cb); },
   onHide: function () {},
+  createInnerAudioContext: makeAudioCtx,
   cloud: { database: function () { return fakeCloud.db; }, init: function () {} }
 };
 global.setTimeout = function (fn) { fn(); return 0; };
@@ -405,6 +420,54 @@ console.log('\n[7] 菜单被动分享：等待中携带房间号');
 
   host.leave();
   app.session = null;
+})();
+
+console.log('\n[8] 绝杀：弹窗带杀法名 + 朗读出来');
+(function () {
+  var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+
+  var c = buttonCenter(manager.current, 'ai');
+  tap(c.x, c.y);
+  assert('进入对局', manager.current.name, 'board');
+  var b = manager.current;
+
+  // 换成「红方一步成杀」的局面（炮二进一，以己方马为架）
+  b.game = new Game('3akN3/4a3C/9/9/9/5R3/9/9/9/5K3 w - - 0 1');
+  b.controller.setGame(b.game);
+  b.resultShown = false;
+  shownModals.length = 0;
+  audioSrcs.length = 0;
+
+  b.controller.requestMove(C.idxOf(8, 1), C.idxOf(8, 0));
+  truthy('走出将死一手', b.game.result);
+  assert('结果带杀法名', b.game.result.mate, '马后炮');
+  assert('结果带杀法 key', b.game.result.mateKey, 'mahoupao');
+  assert('落子动画期间先不弹窗', shownModals.length, 0);
+
+  pumpMs(600);
+  assert('动画播完后弹窗一次', shownModals.length, 1);
+  assert('弹窗标题带杀法名', shownModals[0].title, '绝杀 · 马后炮');
+  assert('弹窗正文带杀法名', shownModals[0].content, '马后炮，绝杀无解，红方胜');
+  truthy('朗读了对应杀法', audioSrcs.indexOf('/audio/mate-mahoupao.m4a') >= 0);
+
+  // 非杀法的终局不朗读、标题也不套杀法名
+  b.resultShown = false;
+  shownModals.length = 0;
+  audioSrcs.length = 0;
+  b.game = new Game();
+  b.controller.setGame(b.game);
+  b.game.finish(C.BLACK, '认输');
+  b.showResult();
+  assert('认输弹窗标题不带杀法名', shownModals[0].title, '对局结束');
+  // 胜负音效照常播，但不应有杀法语音
+  var mateVoices = audioSrcs.filter(function (s) { return s.indexOf('/audio/mate-') === 0; });
+  assert('认输不朗读杀法', mateVoices.length, 0);
+  truthy('认输仍播胜负音效', audioSrcs.length > 0);
+
+  var back = centerOf(b.toolbar[4]);
+  tap(back.x, back.y);
+  assert('返回菜单', manager.current.name, 'menu');
 })();
 
 console.log('\n----------------------------------------');

@@ -16,6 +16,7 @@ var C = require('./constants.js');
 var MG = require('./movegen.js');
 var Position = require('./position.js');
 var NT = require('./notation.js');
+var Mate = require('./mate.js');
 
 /** 和棋（result.winner 取值） */
 var DRAW = -1;
@@ -210,10 +211,20 @@ Game.prototype.status = function () {
  */
 Game.prototype.finish = function (winner, reason) {
   if (this.result) return this.result;
+
+  // 联机时终局是对方广播过来的，reason 为「将死」时本地局面已经同步到终局，
+  // 所以能就地重算杀法名，保证双方弹窗与语音一致
+  var mate = ((winner === C.RED || winner === C.BLACK) && reason === '将死')
+    ? Mate.classifyMate(this.pos, winner)
+    : null;
+
   this.result = {
     winner: winner,
     reason: reason,
-    text: reason + (winner === DRAW ? '，和棋' : '，' + sideName(winner) + '胜')
+    mate: mate ? mate.name : null,
+    mateKey: mate ? mate.key : null,
+    text: (mate ? mate.name + '，' : '') + reason +
+      (winner === DRAW ? '，和棋' : '，' + sideName(winner) + '胜')
   };
   return this.result;
 };
@@ -233,10 +244,16 @@ Game.prototype._detectResult = function (entry) {
   // 1) 无子可动：将死或困毙，均判走子方胜
   if (!MG.hasLegalMove(this.pos, opponent)) {
     var mated = MG.isChecked(this.pos, opponent);
+    // 只有将死才谈得上杀法；困毙是「无子可动」，不是杀
+    var mate = mated ? Mate.classifyMate(this.pos, mover) : null;
     return {
       winner: mover,
       reason: mated ? '将死' : '困毙',
-      text: (mated ? '绝杀无解' : '无子可动') + '，' + sideName(mover) + '胜'
+      // 杀法名与稳定的 ASCII key（供语音等外部资源引用），认不出时均为 null
+      mate: mate ? mate.name : null,
+      mateKey: mate ? mate.key : null,
+      text: (mate ? mate.name + '，' : '') +
+        (mated ? '绝杀无解' : '无子可动') + '，' + sideName(mover) + '胜'
     };
   }
 

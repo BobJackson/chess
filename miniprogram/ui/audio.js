@@ -21,11 +21,16 @@ var SFX_FILES = {
 
 var BGM_FILE = '/audio/bgm.mp3';
 
+/** 杀法语音的路径前缀：/audio/mate-<key>.m4a，key 来自 core/mate.js */
+var MATE_VOICE_PREFIX = '/audio/mate-';
+
 function AudioMgr() {
   this.inited = false;
   this.unavailable = false;
   this.bgm = null;
   this.sfx = {};
+  /** 杀法语音按需创建并缓存，key -> InnerAudioContext */
+  this.mateVoice = {};
   this.muted = false;
   this.bgmOn = true;
   this.sfxOn = true;
@@ -64,6 +69,36 @@ AudioMgr.prototype.play = function (name) {
   if (this.unavailable || this.muted || !this.sfxOn) return false;
   var a = this.sfx[name];
   if (!a) return false;
+  try {
+    a.stop();
+    a.currentTime = 0;
+    a.play();
+  } catch (e) { return false; }
+  return true;
+};
+
+/**
+ * 朗读杀法名（终局绝杀时播放）
+ *
+ * 音频按需创建并缓存：杀法有十几种，初始化时全部建上下文既浪费也可能触到
+ * 平台对同时存在的音频实例数的限制。
+ *
+ * @param {string} key 杀法的 ASCII key，见 core/mate.js 的 MATE_PATTERNS
+ */
+AudioMgr.prototype.playMate = function (key) {
+  if (this.unavailable || this.muted || !this.sfxOn) return false;
+  if (!key || typeof wx === 'undefined' || !wx.createInnerAudioContext) return false;
+
+  var a = this.mateVoice[key];
+  if (!a) {
+    try {
+      a = wx.createInnerAudioContext();
+      a.src = MATE_VOICE_PREFIX + key + '.m4a';
+      a.volume = 0.95;
+      this.mateVoice[key] = a;
+    } catch (e) { return false; }
+  }
+
   try {
     a.stop();
     a.currentTime = 0;
@@ -115,3 +150,4 @@ AudioMgr.prototype._store = function (k, v) {
 module.exports = new AudioMgr();
 module.exports.SFX_FILES = SFX_FILES;
 module.exports.BGM_FILE = BGM_FILE;
+module.exports.MATE_VOICE_PREFIX = MATE_VOICE_PREFIX;

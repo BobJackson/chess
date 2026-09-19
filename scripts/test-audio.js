@@ -106,6 +106,71 @@ console.log('\n[5] BGM 控制');
   assert('开音乐后恢复播放', b.plays, p0 + 2);
 })();
 
+console.log('\n[6] 杀法语音');
+(function () {
+  var before = ctxs.length;
+  assert('未播过时无语音上下文', Object.keys(audio.mateVoice).length, 0);
+
+  assert('朗读马后炮', audio.playMate('mahoupao'), true);
+  assert('按需创建一个上下文', ctxs.length - before, 1);
+  var c = audio.mateVoice.mahoupao;
+  truthy('语音上下文已缓存', c);
+  assert('语音源', c.src, '/audio/mate-mahoupao.m4a');
+  assert('播放一次', c.plays, 1);
+
+  // 同一 key 复用上下文，不重复创建
+  audio.playMate('mahoupao');
+  assert('重复朗读不新建上下文', ctxs.length - before, 1);
+  assert('重复朗读再播一次', c.plays, 2);
+  assert('复播前先 stop 复位', c.stops, 2);
+  assert('复播前时间归零', c.currentTime, 0);
+
+  var n = ctxs.length;
+  audio.playMate('shuangchecuo');
+  assert('换一个 key 另建上下文', ctxs.length - n, 1);
+  assert('双车错语音源', audio.mateVoice.shuangchecuo.src, '/audio/mate-shuangchecuo.m4a');
+
+  assert('空 key 不播放', audio.playMate(''), false);
+  assert('空 key 不新建上下文', ctxs.length - n, 1);
+
+  // 关音效后不朗读，也不建上下文
+  audio.setSfxOn(false);
+  var m = ctxs.length;
+  assert('关音效后不朗读', audio.playMate('wocaoma'), false);
+  assert('关音效后不建上下文', ctxs.length - m, 0);
+  audio.setSfxOn(true);
+
+  // 静音同理
+  audio.setMuted(true);
+  var k = ctxs.length;
+  assert('静音后不朗读', audio.playMate('wocaoma'), false);
+  assert('静音后不建上下文', ctxs.length - k, 0);
+  audio.setMuted(false);
+})();
+
+console.log('\n[7] 杀法语音资产齐备');
+(function () {
+  var fs = require('fs');
+  var Mate = require(path.join(__dirname, '..', 'miniprogram', 'core', 'mate.js'));
+  var dir = path.join(__dirname, '..', 'miniprogram', 'audio');
+
+  var missing = [];
+  var empty = [];
+  Mate.MATE_PATTERNS.forEach(function (p) {
+    var f = path.join(dir, 'mate-' + p.key + '.m4a');
+    if (!fs.existsSync(f)) missing.push(p.key);
+    else if (fs.statSync(f).size < 1024) empty.push(p.key);
+  });
+
+  assert('每种杀法都有语音文件', missing.join(',') || '无缺失', '无缺失');
+  assert('语音文件都不是空壳', empty.join(',') || '无异常', '无异常');
+  // 清单与磁盘必须一一对应，多出来的文件说明有改名漏删
+  var onDisk = fs.readdirSync(dir).filter(function (f) {
+    return f.indexOf('mate-') === 0 && /\.m4a$/.test(f);
+  });
+  assert('磁盘上的语音数量与清单一致', onDisk.length, Mate.MATE_PATTERNS.length);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

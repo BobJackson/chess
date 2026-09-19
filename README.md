@@ -23,20 +23,20 @@
 ```
 project.config.json          compileType = "game"
 package.json                 测试脚本入口（npm test）
-scripts/                     node 测试（每层一个 test-*.js）+ 音效合成 gen-sfx.js
+scripts/                     node 测试（每层一个 test-*.js）+ 音效合成 gen-sfx.js + 杀法语音 gen-mate-voice.js
 server/                      自建联机中继（零依赖 Node WebSocket）
   relay.js                   房间中继纯逻辑（可单测）
   room-server.js             WS 服务端：握手 ?room= 登记 + 按房间广播
 miniprogram/
   game.js                    入口：Canvas/dpr、全局触摸、rAF 主循环、云初始化、场景调度
   game.json                  小游戏配置（竖屏等）
-  core/                      对局核心（纯 JS）：constants/position/movegen/evaluate/ai/book/game/notation
+  core/                      对局核心（纯 JS）：constants/position/movegen/evaluate/ai/book/game/notation/mate
   ui/
     layout.js                棋盘索引 <-> 像素换算、翻转、触摸命中
     renderer.js              棋盘分层绘制（仅依赖 Canvas 2D）
     controller.js            触摸状态机：点选+拖拽、canMove 门控、renderState
     widgets.js               小游戏自绘 UI：按钮/分段/文本换行/命中测试
-    audio.js                 音频管理器：BGM loop + SFX 池 + 开关持久化
+    audio.js                 音频管理器：BGM loop + SFX 池 + 杀法语音 + 开关持久化
   audio/
     bgm.mp3                  中国风 BGM（64s 循环段，56kbps 单声道）
     *.wav                    合成音效：落子/吃子/将军/胜/负/按钮/悔棋
@@ -117,21 +117,56 @@ docker compose up -d
 - **音效**：`audio/*.wav` 由 `npm run gen:sfx`（`scripts/gen-sfx.js`）纯数学合成，无外部素材——落子木质"笃"、吃子闷响、将军两声警示钟、胜/负五声琶音与低锣、按钮轻击、悔棋上挑。
 - **触发点**：落子/吃子/将军/终局/工具栏/菜单/大厅按钮；菜单提供「音乐」「音效」独立开关，与静音状态一起用 `wx.setStorageSync` 持久化。
 - 重新生成音效：`npm run gen:sfx`；替换 BGM 只需覆盖 `audio/bgm.mp3`（建议 ≤64s、单声道 ≤64kbps 以控制包体）。
+- **绝杀语音**：`audio/mate-<key>.m4a`，终局判出杀法时把名字念出来（不只是弹窗显示）。由 `npm run gen:voice`（`scripts/gen-mate-voice.js`）用 macOS 自带的 `say` + `afconvert` 合成，11 条约 88KB；清单以 `core/mate.js` 为单一数据源，改名只需重跑脚本。音频按需创建上下文，不在启动时占用。
+
+## 杀法识别
+
+绝杀时会判出杀法名（如「马后炮」），既写进终局文案，也朗读出来。实现在 `core/mate.js`。
+
+**只覆盖名字由终局几何唯一决定的那一类**，共 11 种：对面笑、马后炮、重炮、闷宫、双车错、卧槽马、挂角马、钓鱼马、侧面虎、二鬼拍门、闷杀。
+「大胆穿心」「炮碾丹砂」这类名字描述的是攻杀过程，终局里已经没有任何信息可以还原，**一律不猜**——认不出时返回 `null`，文案退回「绝杀无解」。
+
+判据依赖一套坐标记法（攻击方看「路」，防守方看「横线」），马位术语因此都是精确格位：
+
+```
+路   = 攻击方纵线编号：红攻黑时 路 = 9 - file；黑攻红时 路 = file + 1
+横线 = 防守方横线编号：黑守时 横线 = rank + 1；红守时 横线 = 10 - rank
+
+卧槽马 (2,1)/(6,1)   挂角马 (3,2)/(5,2)   钓鱼马 (2,2)/(6,2)   侧面虎 (2,3)/(6,3)
+```
+
+`result` 上会多出 `mate`（中文名）与 `mateKey`（ASCII key，供语音等资源引用）两个字段。
+
+**闷宫与闷杀的分界**：闷宫的炮架**一定是对方的士**，且将紧贴炮架；炮架是士以外的子力（或将已离位）就是闷杀。两者常合称「闷将杀」。
+
+### 多音字
+
+朗读用的文本不等于显示名——象棋术语里多音字不少，TTS 会挑最常用的读音，往往不是术语那一个。`MATE_PATTERNS` 里的 `speech` 字段用**同音字**把读音锁死（显示仍是原字）：
+
+| 术语 | 正确读音 | TTS 默认 | 朗读文本 |
+|---|---|---|---|
+| 重炮 | chóng（叠炮） | zhòng ✗ | 虫炮 |
+| 双车错 | jū（象棋里的车） | chē ✗ | 双居错 |
+
+改法：在 `core/mate.js` 对应条目加 `speech`，再跑 `npm run gen:voice`。
+
+**没有耳朵也能验收**：`say` 出来的音频可以解成 PCM 做基频曲线分析，用声调走向判断读的是哪个音——二声（阳平）先微降后上扬，四声（去声）单调下降。改「重炮」时就是用这个方法确认的（旧版第 1 音节 327→204Hz 单调降＝zhòng，新版 208→94→208Hz 先降后扬＝chóng）。
 
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 626 项
-npm run test:engine      # 引擎 61
+npm test                 # 串联全部，当前 911 项
+npm run test:engine      # 引擎 64
 npm run test:ai          # AI 24
 npm run test:game        # 对局 117
-npm run test:ui          # 布局/渲染 97
-npm run test:controller  # 触摸状态机 171
+npm run test:mate        # 杀法识别 116
+npm run test:ui          # 布局/渲染 157
+npm run test:controller  # 触摸状态机 233
 npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21
 npm run test:ws          # 自建 WS 通道（relay+适配器+假服务端）22
-npm run test:audio       # 音频管理器 23
-npm run test:page        # 小游戏接线冒烟（含邀请回流）49
+npm run test:audio       # 音频管理器 44
+npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀语音）72
 ```
 
 ## 操作

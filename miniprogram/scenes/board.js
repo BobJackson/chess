@@ -16,6 +16,9 @@ var W = require('../ui/widgets.js');
 /** layout.height / layout.width 的固定比例（由 PADDING_RATIO 决定） */
 var BOARD_ASPECT = 10.24 / 9.24;
 
+/** 绝杀后延迟多久朗读杀法名：先让胜负音效落一下，两条声音不叠在一起 */
+var MATE_VOICE_DELAY = 550;
+
 // ---------------------------------------------------------------------------
 // 屏幕级装饰（美化棋盘上下的留白）
 // ---------------------------------------------------------------------------
@@ -117,7 +120,11 @@ function createBoardScene(app) {
     statusH: 44,
     toolbarH: 60,
     /** 落子动画播完后要执行的收尾动作（AI 回手 / 终局弹窗），见 runAfterAnim */
-    afterAnim: null
+    afterAnim: null,
+    /** 绝杀语音的延迟定时器 */
+    mateVoiceTimer: null,
+    /** 终局只播一次（音效 + 语音 + 弹窗） */
+    resultShown: false
   };
 
   // -------------------------------------------------------------------------
@@ -310,9 +317,36 @@ function createBoardScene(app) {
   };
 
   scene.showResult = function () {
-    var win = scene.mode === 'local' ? true : (scene.game.result.winner === scene.humanSide);
+    if (scene.resultShown) return;
+    scene.resultShown = true;
+
+    var result = scene.game.result;
+    var win = scene.mode === 'local' ? true : (result.winner === scene.humanSide);
     app.audio.play(win ? 'win' : 'lose');
-    wx.showModal({ title: '对局结束', content: scene.game.result.text, showCancel: false, confirmText: '知道了' });
+
+    // 绝杀时把杀法名念出来——不只是弹窗显示。等胜负音效落一下再念，两条声音不打架
+    if (result.mateKey) {
+      scene.clearMateVoice();
+      scene.mateVoiceTimer = setTimeout(function () {
+        scene.mateVoiceTimer = null;
+        app.audio.playMate(result.mateKey);
+      }, MATE_VOICE_DELAY);
+    }
+
+    wx.showModal({
+      title: result.mate ? '绝杀 · ' + result.mate : '对局结束',
+      content: result.text,
+      showCancel: false,
+      confirmText: '知道了'
+    });
+  };
+
+  /** 离开对局时撤掉还没播出的杀法语音，避免在菜单里突然冒出一句 */
+  scene.clearMateVoice = function () {
+    if (scene.mateVoiceTimer) {
+      clearTimeout(scene.mateVoiceTimer);
+      scene.mateVoiceTimer = null;
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -374,6 +408,8 @@ function createBoardScene(app) {
       if (scene.mode === 'online') { app.toast('联机不可重开'); return; }
       scene.aiThinking = false;
       scene.afterAnim = null;
+      scene.resultShown = false;
+      scene.clearMateVoice();
       scene.game = new Game();
       scene.controller.setGame(scene.game);
       scene.dirty = true; scene.refreshStatus();
@@ -391,6 +427,8 @@ function createBoardScene(app) {
   scene.onExit = function () {
     // 离开对局场景时若仍在联机，通知对手（菜单返回已 leave，这里兜底）
     if (scene.mode === 'online' && scene.session && scene.session.state === 'playing') scene.leave();
+    // 撤掉还没播出的杀法语音，别在菜单里突然冒出一句
+    scene.clearMateVoice();
   };
 
   // -------------------------------------------------------------------------
