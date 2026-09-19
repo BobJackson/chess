@@ -134,6 +134,17 @@ console.log('\n[4] 将帅照面');
   var blocked = new Position('4k4/9/9/9/4R4/9/9/9/9/4K4 w - - 0 1');
   assert('有子遮挡时不构成照面', MG.kingsAreFacing(blocked), false);
   assert('有子遮挡时红方未被将', MG.isChecked(blocked, C.RED), false);
+
+  // 回归：别的列上有子不能影响照面判定。
+  // 旧实现遍历两个将帅索引之间的线性区间，会把中间各横线的其他列一并扫进来，
+  // 于是 (3,3) 的俥就让 (4,0)-(4,9) 的照面被误判为「没照面」。
+  var otherFile = new Position('4k4/9/9/3R5/9/9/9/9/9/4K4 w - - 0 1');
+  assert('别列有子时仍构成照面', MG.kingsAreFacing(otherFile), true);
+  assert('别列有子时红方被将', MG.isChecked(otherFile, C.RED), true);
+
+  // 同一条纵线上、但隔着一段距离有子遮挡，依然不构成照面
+  var farBlock = new Position('4k4/9/4R4/9/9/9/9/9/9/4K4 w - - 0 1');
+  assert('同线远端有子遮挡时不构成照面', MG.kingsAreFacing(farBlock), false);
 })();
 
 console.log('\n[5] 马腿与象眼');

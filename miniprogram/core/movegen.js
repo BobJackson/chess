@@ -237,12 +237,19 @@ function kingsAreFacing(pos) {
   var rk = pos.kingPos[C.RED];
   var bk = pos.kingPos[C.BLACK];
   if (rk < 0 || bk < 0) return false;
-  if (C.fileOf(rk) !== C.fileOf(bk)) return false;
+
+  var file = C.fileOf(rk);
+  if (file !== C.fileOf(bk)) return false;
+
+  // 只能逐格走同一条纵线。注意不能用两个索引之间的线性区间来遍历——
+  // 那会把中间各横线上的其他列一并扫进来，只要别处有子就误判为「没照面」。
   var board = pos.board;
-  var lo = Math.min(rk, bk);
-  var hi = Math.max(rk, bk);
-  for (var i = lo + 1; i < hi; i++) {
-    if (board[i] !== C.EMPTY) return false;
+  var r1 = C.rankOf(rk);
+  var r2 = C.rankOf(bk);
+  var lo = Math.min(r1, r2) + 1;
+  var hi = Math.max(r1, r2);
+  for (var r = lo; r < hi; r++) {
+    if (board[C.idxOf(file, r)] !== C.EMPTY) return false;
   }
   return true;
 }
