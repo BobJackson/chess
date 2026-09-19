@@ -228,11 +228,13 @@ OnlineSession.prototype._onMove = function (msg) {
     this.requestState();
     return;
   }
+  // 先报「走了一步」再报「对局结束」：页面要先播完对手落子的动画，
+  // 再弹终局弹窗，否则弹窗会盖住正在移动的棋子。
+  this._emit('onRemoteMove', res);
   if (this.game.result) {
     this._setState(STATE.ENDED);
     this._emit('onResult', this.game.result);
   }
-  this._emit('onRemoteMove', res);
 };
 
 /** 收到全量状态：重建对局 */

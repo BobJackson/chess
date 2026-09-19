@@ -115,7 +115,9 @@ function createBoardScene(app) {
     boardX: 0,
     boardTop: 0,
     statusH: 44,
-    toolbarH: 60
+    toolbarH: 60,
+    /** 落子动画播完后要执行的收尾动作（AI 回手 / 终局弹窗），见 runAfterAnim */
+    afterAnim: null
   };
 
   // -------------------------------------------------------------------------
@@ -138,7 +140,8 @@ function createBoardScene(app) {
       onMoved: scene.onMoved.bind(scene),
       onIllegal: scene.onIllegal.bind(scene),
       onSelect: scene.onSelect.bind(scene),
-      onCapture: scene.onCapture.bind(scene)
+      onCapture: scene.onCapture.bind(scene),
+      onAnimEnd: scene.onAnimEnd.bind(scene)
     });
 
     if (scene.mode === 'online') scene.bindSession();
@@ -199,11 +202,31 @@ function createBoardScene(app) {
     scene.sfxMove(res);
     if (scene.mode === 'online' && res && res.entry) {
       scene.session.broadcastMove(res.entry.from, res.entry.to);
-      if (scene.game.result) scene.showResult();
-      return;
     }
-    if (scene.game.result) scene.showResult();
-    else if (scene.mode === 'ai' && scene.game.pos.side === scene.aiSide) scene.scheduleAi();
+    // 收尾（AI 回手 / 终局弹窗）等落子动画播完再做，否则会盖住「正在移动的棋子」
+    scene.runAfterAnim(function () {
+      if (scene.game.result) scene.showResult();
+      else if (scene.mode === 'ai' && scene.game.pos.side === scene.aiSide) scene.scheduleAi();
+    });
+  };
+
+  // -------------------------------------------------------------------------
+  // 走子动画
+
+  /**
+   * 走子后的收尾动作：正在播动画就挂起，等棋子落定再执行；否则立即执行。
+   * 同一时刻只保留一个（新的会覆盖旧的）。
+   */
+  scene.runAfterAnim = function (fn) {
+    if (scene.controller && scene.controller.isAnimating()) scene.afterAnim = fn;
+    else fn();
+  };
+
+  scene.onAnimEnd = function () {
+    var fn = scene.afterAnim;
+    scene.afterAnim = null;
+    scene.dirty = true;
+    if (fn) fn();
   };
 
   scene.onIllegal = function (msg) { app.toast(msg || '不符合走法'); };
@@ -223,17 +246,20 @@ function createBoardScene(app) {
   scene.bindSession = function () {
     var o = scene.session.options;
     o.onRemoteMove = function (res) {
+      // 对手的棋子也要看得见是怎么走过来的
+      if (res && res.entry) scene.controller.playMoveAnim(res.entry);
       scene.dirty = true; scene.refreshStatus();
       scene.sfxMove(res);
-      if (scene.game.result) scene.showResult();
     };
     o.onResync = function (game) {
       scene.game = game;
       scene.controller.setGame(game);
+      scene.afterAnim = null;
       scene.dirty = true; scene.refreshStatus();
     };
     o.onResult = function () {
-      scene.dirty = true; scene.refreshStatus(); scene.showResult();
+      scene.dirty = true; scene.refreshStatus();
+      scene.runAfterAnim(function () { scene.showResult(); });
     };
     o.onOpponentLeft = function () {
       scene.dirty = true; scene.refreshStatus();
@@ -262,10 +288,13 @@ function createBoardScene(app) {
         });
       } catch (e) { mv = null; }
       scene.aiThinking = false;
-      if (mv) scene.game.move(mv.from, mv.to);
+      var res = mv ? scene.game.move(mv.from, mv.to) : null;
+      if (res && res.ok) scene.controller.playMoveAnim(res.entry);
       scene.dirty = true;
       scene.refreshStatus();
-      if (scene.game.result) scene.showResult();
+      scene.runAfterAnim(function () {
+        if (scene.game.result) scene.showResult();
+      });
     }, 30);
   };
 
@@ -330,6 +359,7 @@ function createBoardScene(app) {
       if (scene.aiThinking || !scene.game.history.length) return;
       scene.game.undo(scene.mode === 'ai' ? 2 : 1);
       scene.controller.reset();
+      scene.afterAnim = null;
       scene.dirty = true; scene.refreshStatus();
       return;
     }
@@ -343,6 +373,7 @@ function createBoardScene(app) {
     if (id === 'restart') {
       if (scene.mode === 'online') { app.toast('联机不可重开'); return; }
       scene.aiThinking = false;
+      scene.afterAnim = null;
       scene.game = new Game();
       scene.controller.setGame(scene.game);
       scene.dirty = true; scene.refreshStatus();
@@ -366,7 +397,9 @@ function createBoardScene(app) {
   // 渲染
 
   scene.shouldRender = function (dt) {
-    var anim = !!scene.controller.drag || (!scene.game.result && scene.game.isChecked());
+    // 拖拽中、走子动画中、被将军时都需要按帧重绘
+    var anim = !!scene.controller.drag || scene.controller.isAnimating() ||
+      (!scene.game.result && scene.game.isChecked());
     if (anim) { scene.controller.tick(dt); scene.dirty = true; }
     return scene.dirty;
   };

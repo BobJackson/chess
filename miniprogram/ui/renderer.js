@@ -7,7 +7,7 @@
  * 绘制分层：
  *   背景 -> 网格/九宫/炮兵位标记/楚河汉界
  *        -> 上一步标记（棋子下方）
- *        -> 棋子
+ *        -> 棋子（含走子动画中在途的那一枚）
  *        -> 选中环、可走点、将军脉冲、提示（棋子上方）
  */
 
@@ -181,7 +181,7 @@ function drawRiver(ctx, L) {
 /**
  * 在任意屏幕坐标画一枚棋子（拖拽时位置不再是交叉点）
  * @param {number} piece 棋子编码（正红负黑）
- * @param {object} [opts] { scale, dim }
+ * @param {object} [opts] { scale, dim, alpha }
  */
 function drawPieceAt(ctx, L, x, y, piece, opts) {
   opts = opts || {};
@@ -190,6 +190,9 @@ function drawPieceAt(ctx, L, x, y, piece, opts) {
 
   ctx.save();
   if (opts.dim) ctx.globalAlpha = 0.55;
+  else if (typeof opts.alpha === 'number') {
+    ctx.globalAlpha = Math.max(0, Math.min(1, opts.alpha));
+  }
 
   // 投影
   ctx.shadowColor = THEME.pieceShadow;
@@ -235,16 +238,64 @@ function drawPiece(ctx, L, idx, piece, opts) {
   drawPieceAt(ctx, L, L.xOf(idx), L.yOf(idx), piece, opts);
 }
 
-function drawPieces(ctx, L, board, moving) {
+/** 走子动画缓动：起步与落定都平滑（easeInOutCubic） */
+function easeInOutCubic(t) {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/**
+ * 画走子动画中「正在移动的那枚棋子」
+ *
+ * 对局状态在走子瞬间就已更新，终点格上已有棋子；动画期间渲染层跳过终点格，
+ * 改由本函数按进度把棋子从起点插值滑向终点，并在中段微微抬起（缩放），
+ * 落定时缩放回到 1，与终点格上的棋子无缝衔接。
+ *
+ * @param {object} anim { from, to, piece, t }，t 为 0~1 的线性进度
+ */
+function drawMoveAnim(ctx, L, anim) {
+  var e = easeInOutCubic(anim.t);
+  var x0 = L.xOf(anim.from);
+  var y0 = L.yOf(anim.from);
+  var x1 = L.xOf(anim.to);
+  var y1 = L.yOf(anim.to);
+
+  drawPieceAt(ctx, L, x0 + (x1 - x0) * e, y0 + (y1 - y0) * e, anim.piece, {
+    scale: 1 + 0.14 * Math.sin(Math.PI * anim.t)
+  });
+}
+
+/**
+ * 画全部棋子
+ *
+ * @param {object} [moving] 拖拽中的棋子 { from, x, y, piece }
+ * @param {object} [anim]   走子动画 { from, to, piece, captured, t }
+ */
+function drawPieces(ctx, L, board, moving, anim) {
   if (!board) return;
   var dragFrom = moving ? moving.from : -1;
+  var animTo = anim ? anim.to : -1;
+
   for (var i = 0; i < C.BOARD_SIZE; i++) {
     var piece = board[i];
     if (piece === C.EMPTY) continue;
-    // 拖拽中的棋子最后画，保证浮在最上层
-    if (i === dragFrom) continue;
+    // 拖拽中的棋子最后画，保证浮在最上层；走子动画的终点格交给动画层绘制
+    if (i === dragFrom || i === animTo) continue;
     drawPiece(ctx, L, i, piece, null);
   }
+
+  if (anim) {
+    // 被吃的棋子留在终点格淡出，被落下的棋子覆盖后消失
+    if (anim.captured !== C.EMPTY && anim.captured !== undefined) {
+      drawPiece(ctx, L, anim.to, anim.captured, {
+        alpha: 1 - anim.t,
+        scale: 1 - 0.18 * anim.t
+      });
+    }
+    drawMoveAnim(ctx, L, anim);
+  }
+
   if (moving && moving.piece !== C.EMPTY) {
     drawPieceAt(ctx, L, moving.x, moving.y, moving.piece, { scale: 1.10 });
   }
@@ -351,6 +402,8 @@ function drawCheckPulse(ctx, L, idx, pulse) {
  *   hint: {from:number,to:number}, AI 提示着法
  *   moving: {from:number,x:number,y:number,piece:number,hover?:number}, 拖拽中的棋子，
  *           hover 为手指正悬停的合法落点（-1 表示无），用于画落点高亮
+ *   anim: {from:number,to:number,piece:number,captured:number,t:number},
+ *         走子动画中「正在移动的那一枚」，t 为 0~1 的线性进度
  * }
  */
 function draw(ctx, L, state) {
@@ -373,7 +426,7 @@ function draw(ctx, L, state) {
     drawCornerMark(ctx, L, state.hint.to, THEME.hint, 0.34);
   }
 
-  drawPieces(ctx, L, state.board, state.moving);
+  drawPieces(ctx, L, state.board, state.moving, state.anim);
 
   drawTargets(ctx, L, state.board, state.targets);
   // 拖拽悬停的落点高亮：提示用户松手后棋子会落在哪
@@ -399,6 +452,8 @@ module.exports = {
   drawPiece: drawPiece,
   drawPieceAt: drawPieceAt,
   drawPieces: drawPieces,
+  drawMoveAnim: drawMoveAnim,
+  easeInOutCubic: easeInOutCubic,
   drawCornerMark: drawCornerMark,
   drawRing: drawRing,
   drawTargets: drawTargets,

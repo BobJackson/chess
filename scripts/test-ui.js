@@ -49,7 +49,7 @@ function createStubContext() {
     clearRect: [], fillRect: [], strokeRect: [],
     moveTo: [], lineTo: [], arc: [], fillText: [],
     beginPath: 0, stroke: 0, fill: 0, save: 0, restore: 0,
-    gradients: 0, fonts: []
+    gradients: 0, fonts: [], alphas: []
   };
 
   var ctx = {
@@ -70,7 +70,11 @@ function createStubContext() {
     fill: function () { calls.fill++; },
     save: function () { calls.save++; },
     restore: function () { calls.restore++; },
-    fillText: function (t, x, y) { calls.fillText.push([t, x, y]); calls.fonts.push(ctx.font); },
+    fillText: function (t, x, y) {
+      calls.fillText.push([t, x, y]);
+      calls.fonts.push(ctx.font);
+      calls.alphas.push(ctx.globalAlpha);
+    },
     createLinearGradient: function () { calls.gradients++; return gradientStub(); },
     createRadialGradient: function () { calls.gradients++; return gradientStub(); }
   };
@@ -80,6 +84,41 @@ function createStubContext() {
 /** 只统计棋子文字（单字，不含空格的楚河汉界标题） */
 function pieceTexts(calls) {
   return calls.fillText.filter(function (t) { return t[0].indexOf(' ') < 0; });
+}
+
+/** 棋子文字在 fillText 序列中的下标（与 pieceTexts 对应） */
+function pieceIndices(calls) {
+  var out = [];
+  for (var i = 0; i < calls.fillText.length; i++) {
+    if (calls.fillText[i][0].indexOf(' ') < 0) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * 棋子文字是否落在某个交叉点上
+ *
+ * 棋面文字相对圆心下移 r*0.05，而动画中的棋子会缩放，故 y 用容差判定
+ * （容差远小于一个格距，不会误判到相邻交叉点）。
+ */
+function pieceAtSquare(text, L, idx) {
+  return Math.abs(text[1] - L.xOf(idx)) < 0.01 &&
+    Math.abs(text[2] - L.yOf(idx)) < L.pieceRadius * 0.25;
+}
+
+/** 某坐标上棋子的外圈半径（该处没画棋子时返回 null） */
+function radiusAt(calls, x, y) {
+  for (var i = 0; i < calls.arc.length; i++) {
+    if (Math.abs(calls.arc[i][0] - x) < 0.01 && Math.abs(calls.arc[i][1] - y) < 0.01) {
+      return calls.arc[i][2];
+    }
+  }
+  return null;
+}
+
+/** 某交叉点上棋子的外圈半径 */
+function radiusAtSquare(calls, L, idx) {
+  return radiusAt(calls, L.xOf(idx), L.yOf(idx));
 }
 
 console.log('\n[1] 布局尺寸自洽');
@@ -473,6 +512,110 @@ console.log('\n[13] 中文书法字栈');
     if (ctx.calls.fillText[i][0].indexOf(' ') >= 0) { riverIdx = i; break; }
   }
   assert('楚河汉界使用书法字栈', /Kaiti|Songti|serif/.test(ctx.calls.fonts[riverIdx]), true);
+})();
+
+console.log('\n[14] 走子动画：正在移动的那枚棋子');
+(function () {
+  var L = new Layout(375, false);
+  var pos = new Position();
+
+  // 红兵 54 -> 47：起终点不同列也不同行，便于按坐标定位飞行中的棋子
+  var from = C.idxOf(0, 6);
+  var to = C.idxOf(2, 5);
+  var piece = pos.board[from];
+  assert('起点是红兵', piece, C.R_PAWN);
+
+  // 模拟「已经走完这一步」的棋盘：起点空、终点已落子
+  var board = pos.board.slice();
+  board[from] = C.EMPTY;
+  board[to] = piece;
+
+  var midX = (L.xOf(from) + L.xOf(to)) / 2;
+  var midY = (L.yOf(from) + L.yOf(to)) / 2;
+
+  // 14.1 中段：棋子悬在起终点之间，终点格不重复绘制
+  var ctx = createStubContext();
+  R.draw(ctx, L, {
+    board: board,
+    anim: { from: from, to: to, piece: piece, captured: C.EMPTY, t: 0.5 }
+  });
+
+  var texts = pieceTexts(ctx.calls);
+  assert('动画期间棋子总数不变', texts.length, 32);
+
+  // 缓动中点即几何中点，故棋子应正好落在起终点的中间
+  var flying = texts.filter(function (t) {
+    return Math.abs(t[1] - midX) < 0.01 && Math.abs(t[2] - midY) < L.pieceRadius * 0.25;
+  });
+  assert('在途棋子画在起终点之间', flying.length, 1);
+  assert('在途棋子文字为兵', flying[0][0], '兵');
+  assert('终点格不再重复绘制',
+    texts.filter(function (t) { return pieceAtSquare(t, L, to); }).length, 0);
+
+  // 14.2 中段抬起：棋子比落定状态更大
+  var midR = radiusAt(ctx.calls, midX, midY);
+  assert('在途棋子有外圈', typeof midR === 'number', true);
+  assert('在途棋子被抬起（半径变大）', midR > L.pieceRadius, true);
+
+  // 14.3 t=0 时仍在起点，t=1 时正好落在终点且尺寸复原
+  var ctx0 = createStubContext();
+  R.draw(ctx0, L, { board: board, anim: { from: from, to: to, piece: piece, captured: C.EMPTY, t: 0 } });
+  assert('t=0 时棋子仍在起点',
+    pieceTexts(ctx0.calls).filter(function (t) { return pieceAtSquare(t, L, from); }).length, 1);
+
+  var ctx1 = createStubContext();
+  R.draw(ctx1, L, { board: board, anim: { from: from, to: to, piece: piece, captured: C.EMPTY, t: 1 } });
+  assert('t=1 时棋子落在终点',
+    pieceTexts(ctx1.calls).filter(function (t) { return pieceAtSquare(t, L, to); }).length, 1);
+  approx('落定时缩放回到 1', radiusAtSquare(ctx1.calls, L, to), L.pieceRadius);
+
+  // 14.4 吃子：被吃棋子在终点格淡出，且比静止时小
+  var capCtx = createStubContext();
+  R.draw(capCtx, L, {
+    board: board,
+    anim: { from: from, to: to, piece: piece, captured: C.B_PAWN, t: 0.5 }
+  });
+  var capTexts = pieceTexts(capCtx.calls);
+  assert('吃子动画多出被吃的卒', capTexts.length, 33);
+  var dead = capTexts.filter(function (t) { return pieceAtSquare(t, L, to); });
+  assert('被吃棋子留在终点格', dead.length, 1);
+  assert('被吃棋子文字为卒', dead[0][0], '卒');
+  assert('被吃棋子缩小', radiusAtSquare(capCtx.calls, L, to) < L.pieceRadius, true);
+
+  // 淡出用 globalAlpha 表现：被吃棋子的绘制透明度应小于 1
+  var idxs = pieceIndices(capCtx.calls);
+  var deadAlpha = null;
+  for (var i = 0; i < idxs.length; i++) {
+    var t2 = capCtx.calls.fillText[idxs[i]];
+    if (pieceAtSquare(t2, L, to)) deadAlpha = capCtx.calls.alphas[idxs[i]];
+  }
+  approx('被吃棋子半透明', deadAlpha, 0.5);
+
+  // 14.5 无动画时行为不变：终点格照常绘制
+  var plain = createStubContext();
+  R.draw(plain, L, { board: board });
+  assert('无动画时照常绘制终点格棋子',
+    pieceTexts(plain.calls).filter(function (t) { return pieceAtSquare(t, L, to); }).length, 1);
+})();
+
+console.log('\n[15] 走子动画缓动');
+(function () {
+  assert('t=0 缓动为 0', R.easeInOutCubic(0), 0);
+  assert('t=1 缓动为 1', R.easeInOutCubic(1), 1);
+  approx('中点为 0.5', R.easeInOutCubic(0.5), 0.5);
+  assert('区间外被夹紧', R.easeInOutCubic(-1), 0);
+  assert('区间外被夹紧（上界）', R.easeInOutCubic(2), 1);
+  // 单调递增：起步慢、中段快、落定慢
+  var prev = -1;
+  var monotonic = true;
+  for (var t = 0; t <= 1.0001; t += 0.05) {
+    var v = R.easeInOutCubic(t);
+    if (v < prev) monotonic = false;
+    prev = v;
+  }
+  assert('全程单调不减', monotonic, true);
+  assert('起步比线性慢（缓入）', R.easeInOutCubic(0.25) < 0.25, true);
+  assert('落定前比线性快（缓出）', R.easeInOutCubic(0.75) > 0.75, true);
 })();
 
 console.log('\n----------------------------------------');

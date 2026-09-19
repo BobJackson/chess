@@ -6,7 +6,7 @@
  * 这里用真实的 Layout + Game 驱动它，覆盖：
  *   构造与复位、canOperate 门控、点选式与拖拽式走子、非法走子、
  *   回调触发（onSelect/onMoved/onIllegal/onCapture）、renderState 组装、
- *   将军脉冲 tick、换局 setGame，以及对 renderer 的驱动。
+ *   走子动画生命周期、将军脉冲 tick、换局 setGame，以及对 renderer 的驱动。
  */
 
 var Controller = require('../miniprogram/ui/controller.js');
@@ -110,9 +110,11 @@ console.log('\n[1] 构造与初始状态');
   assert('初始无拖拽', s.ctrl.drag, null);
   assert('初始无提示', s.ctrl.hint, null);
   assert('初始脉冲为 0', s.ctrl.pulse, 0);
+  assert('初始无走子动画', s.ctrl.anim, null);
   truthy('持有 layout', s.ctrl.layout);
   truthy('持有 game', s.ctrl.game);
   assert('导出的拖拽阈值比例', Controller.DRAG_RATIO, 0.35);
+  assert('导出的走子动画时长', Controller.MOVE_DURATION, 200);
 })();
 
 console.log('\n[2] canOperate 门控');
@@ -372,6 +374,7 @@ console.log('\n[9] renderState 组装');
   assert('默认脉冲 0', st.pulse, 0);
   assert('默认无提示', st.hint, null);
   assert('默认无拖拽子', st.moving, null);
+  assert('默认无走子动画', st.anim, null);
 
   // 9.2 选中态
   s.ctrl.select(PAWN);
@@ -403,10 +406,18 @@ console.log('\n[9] renderState 组装');
   truthy('非法悬停仍有 moving', sth.moving);
   assert('悬停非法点时 hover 为 -1', sth.moving.hover, -1);
 
-  // 9.4 上一步标记
+  // 9.4 上一步标记：动画期间让位，播完才出现（否则会提前剧透落点）
   var m = mkController();
   m.ctrl.requestMove(PAWN, PAWN_TO);
+  var stAnim = m.ctrl.renderState();
+  truthy('走子后 renderState 含 anim', stAnim.anim);
+  assert('renderState.anim.from', stAnim.anim.from, PAWN);
+  assert('renderState.anim.to', stAnim.anim.to, PAWN_TO);
+  assert('动画期间不画上一步标记', stAnim.lastMove, null);
+
+  m.ctrl.tick(Controller.MOVE_DURATION);
   var st4 = m.ctrl.renderState();
+  assert('播完后 anim 清空', st4.anim, null);
   truthy('走上一步后含 lastMove', st4.lastMove);
   assert('lastMove.from', st4.lastMove.from, PAWN);
   assert('lastMove.to', st4.lastMove.to, PAWN_TO);
@@ -454,6 +465,7 @@ console.log('\n[11] setGame / reset 复位');
   s.ctrl.select(PAWN);
   s.ctrl.setHint({ from: PAWN, to: PAWN_TO });
   s.ctrl.pulse = 0.7;
+  s.ctrl.playMoveAnim({ from: PAWN, to: PAWN_TO, piece: C.R_PAWN, captured: C.EMPTY });
 
   var other = new Game();
   var ret = s.ctrl.setGame(other);
@@ -463,6 +475,7 @@ console.log('\n[11] setGame / reset 复位');
   assert('setGame 清空落点', s.ctrl.targets.length, 0);
   assert('setGame 清空提示', s.ctrl.hint, null);
   assert('setGame 复位脉冲', s.ctrl.pulse, 0);
+  assert('setGame 清空走子动画', s.ctrl.anim, null);
 
   // reset 单独复位视图但不换局
   s.ctrl.select(PAWN);
@@ -476,6 +489,7 @@ console.log('\n[11] setGame / reset 复位');
   assert('reset 清空拖拽', s.ctrl.drag, null);
   assert('reset 清空提示', s.ctrl.hint, null);
   assert('reset 复位脉冲', s.ctrl.pulse, 0);
+  assert('reset 清空走子动画', s.ctrl.anim, null);
 })();
 
 console.log('\n[12] render 驱动 renderer.draw');
@@ -527,11 +541,90 @@ console.log('\n[13] 多指误触防护（单手势模型）');
   assert('忽略第二指后仍能正常落子', done, true);
   assert('落子为 54->45', d.game.pos.side, C.BLACK);
 
-  // 13.3 手势结束后控制器不冻结，可继续操作（轮到黑方点黑兵）
+  // 13.3 手势结束后控制器不冻结：先被落子动画挡 200ms，落定后可继续操作
   var bp = at(d.layout, 27); // 黑兵
+  assert('抬手后仍在播落子动画', d.ctrl.isAnimating(), true);
+  assert('动画期间按下被挡', d.ctrl.touchStart(bp.x, bp.y), false);
+  d.ctrl.tick(Controller.MOVE_DURATION);
   var r3 = d.ctrl.touchStart(bp.x, bp.y);
-  assert('抬手后可再次按下', r3, true);
+  assert('落定后可再次按下', r3, true);
   assert('轮到黑方时可选中黑兵', d.ctrl.selected, 27);
+})();
+
+console.log('\n[14] 走子动画：把「正在移动的棋子」交给渲染层');
+(function () {
+  // 14.1 走子成功即进入动画，棋子从起点滑向终点
+  var s = mkController();
+  var res = s.ctrl.requestMove(PAWN, PAWN_TO);
+  truthy('走子成功', res.ok);
+  truthy('走子后进入动画', s.ctrl.isAnimating());
+  assert('anim.from', s.ctrl.anim.from, PAWN);
+  assert('anim.to', s.ctrl.anim.to, PAWN_TO);
+  assert('anim 记录走子棋子', s.ctrl.anim.piece, C.R_PAWN);
+  assert('anim 起始进度为 0', s.ctrl.anim.t, 0);
+  assert('anim 时长为 MOVE_DURATION', s.ctrl.anim.dur, Controller.MOVE_DURATION);
+
+  // 14.2 动画期间暂停收输入，避免与飞行中的棋子抢状态
+  assert('动画期间不可操作', s.ctrl.canOperate(), false);
+  var p2 = at(s.layout, 27); // 轮到黑方，但即便轮到自己也应被动画挡住
+  assert('动画期间按下被拒', s.ctrl.touchStart(p2.x, p2.y), false);
+  assert('动画期间未产生选中', s.ctrl.selected, -1);
+
+  // 14.3 tick 按帧推进进度
+  s.ctrl.tick(Controller.MOVE_DURATION / 2);
+  approx('半程进度 0.5', s.ctrl.anim.t, 0.5);
+  truthy('半程仍在动画中', s.ctrl.isAnimating());
+
+  // 14.4 播完即落定：动画清空、onAnimEnd 触发、恢复操作
+  var ended = 0;
+  s.ctrl.options.onAnimEnd = function () { ended++; };
+  s.ctrl.tick(Controller.MOVE_DURATION / 2);
+  assert('播完触发 onAnimEnd 一次', ended, 1);
+  assert('播完动画清空', s.ctrl.anim, null);
+  assert('播完恢复操作', s.ctrl.canOperate(), true);
+  s.ctrl.tick(500);
+  assert('播完后再 tick 不重复触发', ended, 1);
+
+  // 14.5 吃子动画携带被吃棋子（渲染层据此在终点格淡出旧子）
+  var cap = mkController({ fen: CAPTURE_FEN });
+  cap.ctrl.requestMove(ROOK, ROOK_CAPTURE);
+  var stc = cap.ctrl.renderState();
+  truthy('吃子后进入动画', stc.anim);
+  assert('anim 携带被吃棋子', stc.anim.captured, C.B_PAWN);
+  assert('anim 携带走子棋子为红车', stc.anim.piece, C.R_ROOK);
+
+  // 14.6 手动播放：AI 与联机对手的着法绕过 controller 落子，需显式喂入着法记录
+  var ai = mkController();
+  var r2 = ai.game.move(PAWN, PAWN_TO);
+  truthy('手动播放返回动画状态', ai.ctrl.playMoveAnim(r2.entry));
+  assert('手动播放的起点', ai.ctrl.anim.from, PAWN);
+  assert('手动播放的终点', ai.ctrl.anim.to, PAWN_TO);
+  assert('手动播放的棋子', ai.ctrl.anim.piece, C.R_PAWN);
+
+  // 14.7 instant：重连/重放时直接落定，不播动画
+  var inst = mkController();
+  var r3 = inst.game.move(PAWN, PAWN_TO);
+  assert('instant 不返回动画', inst.ctrl.playMoveAnim(r3.entry, { instant: true }), null);
+  assert('instant 后无动画', inst.ctrl.anim, null);
+
+  // 14.8 异常输入不着动画
+  var bad = mkController();
+  bad.ctrl.requestMove(PAWN, PAWN + 18); // 非法着法
+  assert('非法着法不起动画', bad.ctrl.anim, null);
+  var noop = mkController();
+  assert('空着法记录不着动画', noop.ctrl.playMoveAnim(null), null);
+  assert('原地着法不着动画', noop.ctrl.playMoveAnim({ from: 5, to: 5, piece: 1 }), null);
+
+  // 14.9 finishAnim 立即落定，且不再回调 onAnimEnd
+  var fin = mkController();
+  fin.ctrl.requestMove(PAWN, PAWN_TO);
+  var endCount = 0;
+  fin.ctrl.options.onAnimEnd = function () { endCount++; };
+  truthy('finishAnim 返回被中断的动画', fin.ctrl.finishAnim());
+  assert('finishAnim 后无动画', fin.ctrl.anim, null);
+  assert('finishAnim 不触发 onAnimEnd', endCount, 0);
+  fin.ctrl.tick(500);
+  assert('finishAnim 后再 tick 也不触发', endCount, 0);
 })();
 
 console.log('\n----------------------------------------');

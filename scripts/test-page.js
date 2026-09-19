@@ -184,6 +184,20 @@ function pump(ts) {
   if (global.__canvas && global.__canvas._raf) global.__canvas._raf(ts || 16);
 }
 
+/**
+ * 推进 ms 毫秒的 rAF 帧
+ *
+ * 主循环按帧间 dt 驱动走子动画，故时间戳必须单调累积；
+ * 落子动画播完才会轮到 AI 应招，测试里靠这个把时间推过去。
+ */
+var frameClock = 32;
+function pumpMs(ms) {
+  for (var t = 0; t < ms; t += 16) {
+    frameClock += 16;
+    pump(frameClock);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 加载入口
 // ---------------------------------------------------------------------------
@@ -232,7 +246,13 @@ console.log('\n[2] 人机对局：走子 + AI 应招 + 返回');
   assert('点选选中红兵', b.controller.selected, 54);
   tap(sx + to.x, sy + to.y);
   assert('人手走子成功', b.game.history.length >= 1, true);
+
+  // 落子动画期间 AI 不抢手：先看见自己的兵走过去，再轮到对手
+  assert('人手走子后进入落子动画', b.controller.isAnimating(), true);
+  assert('动画未播完时 AI 不应招', b.game.history.length, 1);
+  pumpMs(600);
   assert('AI 已应招（共两手）', b.game.history.length, 2);
+  assert('双方落子动画均已播完', b.controller.isAnimating(), false);
 
   // 工具栏返回
   var back = centerOf(b.toolbar[4]);

@@ -8,6 +8,9 @@
  *   点击式 —— 先点起点选中，再点落点走子
  *   拖拽式 —— 按住棋子拖到落点松手
  *
+ * 走子成功后播放「走子动画」：把刚走的那枚棋子从起点滑到终点，
+ * 而不是让它在终点凭空出现。动画期间暂停收输入，播完通过 onAnimEnd 通知外部。
+ *
  * 是否允许操作由外部注入的 canMove 决定（人机模式下 AI 思考时禁止、
  * 联机模式下只有轮到自己才允许）。
  *
@@ -19,6 +22,9 @@ var C = require('../core/constants.js');
 /** 拖动超过该比例格距才算拖拽，否则视为点击 */
 var DRAG_RATIO = 0.35;
 
+/** 走子动画时长（毫秒） */
+var MOVE_DURATION = 200;
+
 /**
  * @constructor
  * @param {Layout} layout
@@ -29,6 +35,7 @@ var DRAG_RATIO = 0.35;
  *   onIllegal: function(message),  走子被拒后回调
  *   onSelect: function(idx,targets), 选中棋子后回调
  *   onCapture: function(entry),    吃子后回调（用于音效/振动）
+ *   onAnimEnd: function(anim),     走子动画播完回调（用于 AI 回手/终局弹窗）
  * }
  */
 function Controller(layout, game, options) {
@@ -46,11 +53,14 @@ function Controller(layout, game, options) {
   this.hint = null;
   /** 将军脉冲相位 0~1 */
   this.pulse = 0;
+  /** 走子动画 {from,to,piece,captured,t,dur}，null 表示无动画 */
+  this.anim = null;
 }
 
-/** 是否允许本地操作（对局未结束且外部许可） */
+/** 是否允许本地操作（对局未结束、动画已落定且外部许可） */
 Controller.prototype.canOperate = function () {
   if (!this.game || this.game.result) return false;
+  if (this.anim) return false;   // 棋子还在飞，等落定再收输入
   var fn = this.options.canMove;
   return typeof fn === 'function' ? !!fn() : true;
 };
@@ -69,6 +79,7 @@ Controller.prototype.reset = function () {
   this.drag = null;
   this.hint = null;
   this.pulse = 0;
+  this.anim = null;
   return this;
 };
 
@@ -86,11 +97,10 @@ Controller.prototype.select = function (idx) {
 };
 
 /**
- * 请求走子。成功后清空选中与提示，并触发回调。
+ * 请求走子。成功后清空选中与提示、播放走子动画，并触发回调。
  * @returns {object} Game.move 的结果
  */
 Controller.prototype.requestMove = function (from, to) {
-  var entry = this.game.history.length ? this.game.history[this.game.history.length - 1] : null;
   var res = this.game.move(from, to);
   if (!res.ok) {
     if (this.options.onIllegal) this.options.onIllegal(res.error);
@@ -99,11 +109,59 @@ Controller.prototype.requestMove = function (from, to) {
   this.clearSelection();
   this.hint = null;
   this.drag = null;
+  // 先起动画再回调：回调里可能要判断「动画是否在播」来决定后续流程
+  this.playMoveAnim(res.entry);
   if (res.entry.captured !== C.EMPTY && this.options.onCapture) {
     this.options.onCapture(res.entry);
   }
   if (this.options.onMoved) this.options.onMoved(res);
   return res;
+};
+
+// ---------------------------------------------------------------------------
+// 走子动画
+// ---------------------------------------------------------------------------
+
+/**
+ * 播放走子动画：把刚走的那枚棋子从起点滑到终点
+ *
+ * 对局状态在 Game.move 时已即时更新（终点格上已有棋子），所以动画期间由
+ * 渲染层「跳过终点格 + 在途绘制飞行棋子」来表现移动过程，逻辑层无需回滚。
+ *
+ * @param {object} entry Game.move 返回的着法记录 {from,to,piece,captured}
+ * @param {object} [opts] { instant: true } 直接落定、不播动画（重连/重放用）
+ * @returns {?object} 动画状态；未播放时返回 null
+ */
+Controller.prototype.playMoveAnim = function (entry, opts) {
+  if (opts && opts.instant) { this.anim = null; return null; }
+  if (!entry || typeof entry.from !== 'number' || typeof entry.to !== 'number') return null;
+  if (entry.from === entry.to) return null;
+
+  var piece = typeof entry.piece === 'number' && entry.piece !== C.EMPTY
+    ? entry.piece
+    : (this.game ? this.game.pos.board[entry.to] : C.EMPTY);
+
+  this.anim = {
+    from: entry.from,
+    to: entry.to,
+    piece: piece,
+    captured: typeof entry.captured === 'number' ? entry.captured : C.EMPTY,
+    t: 0,
+    dur: MOVE_DURATION
+  };
+  return this.anim;
+};
+
+/** 是否正在播放走子动画（用于跳过输入、驱动重绘） */
+Controller.prototype.isAnimating = function () {
+  return !!this.anim;
+};
+
+/** 立即结束走子动画（直接落定，不触发 onAnimEnd） */
+Controller.prototype.finishAnim = function () {
+  var anim = this.anim;
+  this.anim = null;
+  return anim;
 };
 
 /** 指定一枚己方棋子由代码选中（提示、AI 演示等场景） */
@@ -118,11 +176,24 @@ Controller.prototype.setHint = function (hint) {
   return this.hint;
 };
 
-/** 推进将军脉冲动画相位 */
+/** 推进将军脉冲与走子动画（由页面按帧驱动） */
 Controller.prototype.tick = function (dt) {
-  var step = (dt || 16) / 900;
+  var ms = dt || 16;
+
+  var step = ms / 900;
   this.pulse += step;
   if (this.pulse > 1) this.pulse -= Math.floor(this.pulse);
+
+  var anim = this.anim;
+  if (anim) {
+    anim.t += ms / anim.dur;
+    if (anim.t >= 1) {
+      anim.t = 1;
+      this.anim = null;
+      // 动画播完才通知外部（AI 回手、终局弹窗都等棋子落定）
+      if (this.options.onAnimEnd) this.options.onAnimEnd(anim);
+    }
+  }
   return this.pulse;
 };
 
@@ -227,9 +298,11 @@ Controller.prototype.touchCancel = function () {
 Controller.prototype.renderState = function () {
   var game = this.game;
   var board = game ? game.pos.board : null;
+  var anim = this.anim;
 
+  // 动画期间不画「上一步」四角标记：终点格还没被走到，标记会提前剧透落点
   var lastMove = null;
-  if (game) {
+  if (game && !anim) {
     var last = game.lastEntry();
     if (last) lastMove = { from: last.from, to: last.to };
   }
@@ -254,6 +327,11 @@ Controller.prototype.renderState = function () {
       from: dragging.from, x: dragging.x, y: dragging.y, piece: dragging.piece,
       // 手指正悬停的合法落点，供渲染层画「松手落点」高亮
       hover: dragging.hover
+    } : null,
+    // 正在移动的那枚棋子：渲染层据此跳过终点格并绘制在途棋子
+    anim: anim ? {
+      from: anim.from, to: anim.to, piece: anim.piece,
+      captured: anim.captured, t: anim.t
     } : null
   };
 };
@@ -265,3 +343,4 @@ Controller.prototype.render = function (ctx, renderer) {
 
 module.exports = Controller;
 module.exports.DRAG_RATIO = DRAG_RATIO;
+module.exports.MOVE_DURATION = MOVE_DURATION;
