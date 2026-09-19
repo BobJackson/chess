@@ -397,8 +397,9 @@ function createBoardScene(app) {
   // 渲染
 
   scene.shouldRender = function (dt) {
-    // 拖拽中、走子动画中、被将军时都需要按帧重绘
+    // 拖拽中、走子动画中、落子余晖未散、被将军时都需要按帧重绘
     var anim = !!scene.controller.drag || scene.controller.isAnimating() ||
+      scene.controller.isLanding() ||
       (!scene.game.result && scene.game.isChecked());
     if (anim) { scene.controller.tick(dt); scene.dirty = true; }
     return scene.dirty;

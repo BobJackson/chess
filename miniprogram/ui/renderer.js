@@ -66,6 +66,26 @@ function lineWidth(cell, ratio) {
   return Math.max(1, cell * ratio);
 }
 
+/**
+ * 由主题色派生指定透明度（支持 #rrggbb 与 rgb()/rgba() 两种写法）
+ * 用于把不透明的强调色铺成渐隐的光晕。
+ */
+function withAlpha(color, alpha) {
+  var hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color);
+  if (hex) {
+    var h = hex[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+  }
+  var rgb = /^rgba?\(([^)]+)\)$/i.exec(color);
+  if (rgb) {
+    var p = rgb[1].split(',');
+    return 'rgba(' + p[0].trim() + ',' + p[1].trim() + ',' + p[2].trim() + ',' + alpha + ')';
+  }
+  return color;
+}
+
 // ---------------------------------------------------------------------------
 // 棋盘底层
 // ---------------------------------------------------------------------------
@@ -330,6 +350,59 @@ function drawCornerMark(ctx, L, idx, color, ratio) {
   ctx.restore();
 }
 
+/**
+ * 棋子光晕：在该棋子下方垫一圈柔和的径向辉光
+ *
+ * 直接标出「是哪一枚」，而不是框住哪一格。用径向渐变由棋子边缘向外衰减，
+ * 比描硬边圆环更接近「发光」的观感，也压得住木质棋盘的暖调。
+ * 画在棋子之前——光从棋子底下透出来，同时避免糊住棋面。
+ *
+ * @param {number} [boost] 0~1 起势强度：落子瞬间给一下更亮的爆闪，再回落到常亮
+ */
+function drawPieceGlow(ctx, L, idx, color, boost) {
+  var b = typeof boost === 'number' && boost > 0 ? Math.min(1, boost) : 0;
+  var x = L.xOf(idx);
+  var y = L.yOf(idx);
+  var r0 = L.pieceRadius * 0.90;
+  var r1 = L.pieceRadius * (1.90 + 0.40 * b);
+
+  var g = ctx.createRadialGradient(x, y, r0, x, y, r1);
+  g.addColorStop(0, withAlpha(color, 0.38 + 0.30 * b));
+  g.addColorStop(0.45, withAlpha(color, 0.15 + 0.15 * b));
+  g.addColorStop(1, withAlpha(color, 0));
+
+  ctx.save();
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * 画一组着法标记（上一步 / 提示的起点与终点）
+ *
+ * 空格用四角小角标即可；但格子有棋子时角标会被整块盖住（角标 half 远小于棋子
+ * 半径，且画在棋子之前），改为给那枚棋子垫一圈光晕——既不会被遮住，
+ * 又能直接指出「是哪一枚」。
+ *
+ * @param {object} board 当前棋盘（用于判断格子占用）
+ * @param {object} move { from, to }
+ * @param {string} color 标记色，同时用于角标与光晕
+ * @param {number} smallRatio 空格角标尺寸（相对格距）
+ * @param {number} [boost] 光晕起势强度，透传给 drawPieceGlow
+ */
+function drawMoveMarks(ctx, L, board, move, color, smallRatio, boost) {
+  if (!move) return;
+  var idxs = [move.from, move.to];
+
+  for (var i = 0; i < idxs.length; i++) {
+    var idx = idxs[i];
+    if (typeof idx !== 'number' || idx < 0) continue;
+    if (board && board[idx] !== C.EMPTY) drawPieceGlow(ctx, L, idx, color, boost);
+    else drawCornerMark(ctx, L, idx, color, smallRatio);
+  }
+}
 function drawRing(ctx, L, idx, color, widthRatio, radiusExtra) {
   ctx.save();
   ctx.strokeStyle = color;
@@ -404,6 +477,7 @@ function drawCheckPulse(ctx, L, idx, pulse) {
  *           hover 为手指正悬停的合法落点（-1 表示无），用于画落点高亮
  *   anim: {from:number,to:number,piece:number,captured:number,t:number},
  *         走子动画中「正在移动的那一枚」，t 为 0~1 的线性进度
+ *   land: number, 光晕起势强度 1~0，走子动画落定时置 1 后衰减；0 即常亮态
  * }
  */
 function draw(ctx, L, state) {
@@ -416,15 +490,10 @@ function draw(ctx, L, state) {
   drawMarks(ctx, L);
   drawRiver(ctx, L);
 
-  // 上一步标记画在棋子下方，避免遮挡棋面
-  if (state.lastMove) {
-    drawCornerMark(ctx, L, state.lastMove.from, THEME.lastMove, 0.44);
-    drawCornerMark(ctx, L, state.lastMove.to, THEME.lastMove, 0.44);
-  }
-  if (state.hint) {
-    drawCornerMark(ctx, L, state.hint.from, THEME.hint, 0.34);
-    drawCornerMark(ctx, L, state.hint.to, THEME.hint, 0.34);
-  }
+  // 着法标记画在棋子下方：空格用小角标，有棋子的格子垫一圈光晕标出「是哪一枚」
+  // 上一步的棋子常亮发光；落子瞬间由 land 给一下更亮的起势，再回落到常亮
+  drawMoveMarks(ctx, L, state.board, state.lastMove, THEME.lastMove, 0.44, state.land);
+  drawMoveMarks(ctx, L, state.board, state.hint, THEME.hint, 0.34, 0);
 
   drawPieces(ctx, L, state.board, state.moving, state.anim);
 
@@ -455,6 +524,9 @@ module.exports = {
   drawMoveAnim: drawMoveAnim,
   easeInOutCubic: easeInOutCubic,
   drawCornerMark: drawCornerMark,
+  drawMoveMarks: drawMoveMarks,
+  drawPieceGlow: drawPieceGlow,
+  withAlpha: withAlpha,
   drawRing: drawRing,
   drawTargets: drawTargets,
   drawCheckPulse: drawCheckPulse

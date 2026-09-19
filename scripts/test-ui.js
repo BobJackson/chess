@@ -49,8 +49,16 @@ function createStubContext() {
     clearRect: [], fillRect: [], strokeRect: [],
     moveTo: [], lineTo: [], arc: [], fillText: [],
     beginPath: 0, stroke: 0, fill: 0, save: 0, restore: 0,
-    gradients: 0, fonts: [], alphas: []
+    gradients: 0, fonts: [], alphas: [],
+    gradientsSpec: [],
+    order: []
   };
+
+  function recordGradient() {
+    var g = gradientStub();
+    calls.gradientsSpec.push(g);
+    return g;
+  }
 
   var ctx = {
     calls: calls,
@@ -63,9 +71,9 @@ function createStubContext() {
     strokeRect: function () { calls.strokeRect.push([].slice.call(arguments)); },
     beginPath: function () { calls.beginPath++; },
     closePath: function () {},
-    moveTo: function (x, y) { calls.moveTo.push([x, y]); },
+    moveTo: function (x, y) { calls.moveTo.push([x, y]); calls.order.push('moveTo'); },
     lineTo: function (x, y) { calls.lineTo.push([x, y]); },
-    arc: function (x, y, r) { calls.arc.push([x, y, r]); },
+    arc: function (x, y, r) { calls.arc.push([x, y, r]); calls.order.push('arc'); },
     stroke: function () { calls.stroke++; },
     fill: function () { calls.fill++; },
     save: function () { calls.save++; },
@@ -74,9 +82,10 @@ function createStubContext() {
       calls.fillText.push([t, x, y]);
       calls.fonts.push(ctx.font);
       calls.alphas.push(ctx.globalAlpha);
+      calls.order.push('fillText');
     },
-    createLinearGradient: function () { calls.gradients++; return gradientStub(); },
-    createRadialGradient: function () { calls.gradients++; return gradientStub(); }
+    createLinearGradient: function () { calls.gradients++; return recordGradient(); },
+    createRadialGradient: function () { calls.gradients++; return recordGradient(); }
   };
   return ctx;
 }
@@ -119,6 +128,37 @@ function radiusAt(calls, x, y) {
 /** 某交叉点上棋子的外圈半径 */
 function radiusAtSquare(calls, L, idx) {
   return radiusAt(calls, L.xOf(idx), L.yOf(idx));
+}
+
+/**
+ * 一组角标点相对某格中心的「最远伸展」与「最近净空」，单位均为格距
+ *
+ * 角标由 4 个象限的 L 形折线构成：每象限 1 次 moveTo（内折点）+ 2 次 lineTo。
+ * 最近净空 < 棋子半径（0.44 格距）就意味着角标会被棋子整块盖住。
+ */
+function markExtent(points, L, idx) {
+  var x = L.xOf(idx);
+  var y = L.yOf(idx);
+  var max = 0;
+  var min = Infinity;
+  for (var i = 0; i < points.length; i++) {
+    var dx = points[i][0] - x;
+    var dy = points[i][1] - y;
+    max = Math.max(max, Math.abs(dx), Math.abs(dy));
+    min = Math.min(min, Math.sqrt(dx * dx + dy * dy));
+  }
+  return { reach: max / L.cell, clear: min / L.cell };
+}
+
+/** 第 n 次（0 起）某类调用在调用顺序日志中的位置，用于验证绘制层级 */
+function orderIndexOf(calls, tag, n) {
+  var seen = -1;
+  for (var i = 0; i < calls.order.length; i++) {
+    if (calls.order[i] !== tag) continue;
+    seen++;
+    if (seen === n) return i;
+  }
+  return -1;
 }
 
 console.log('\n[1] 布局尺寸自洽');
@@ -616,6 +656,123 @@ console.log('\n[15] 走子动画缓动');
   assert('全程单调不减', monotonic, true);
   assert('起步比线性慢（缓入）', R.easeInOutCubic(0.25) < 0.25, true);
   assert('落定前比线性快（缓出）', R.easeInOutCubic(0.75) > 0.75, true);
+})();
+
+console.log('\n[16] 上一步棋子标记：持续发光，一眼看出刚动的是哪枚子');
+(function () {
+  var L = new Layout(375, false);
+  var board = new Position().board;
+
+  // 红兵 54 走到空位 47
+  var FROM = C.idxOf(0, 6);
+  var TO = C.idxOf(2, 5);
+  var moved = board.slice();
+  moved[TO] = moved[FROM];
+  moved[FROM] = C.EMPTY;
+  var move = { from: FROM, to: TO };
+  var pieceR = L.pieceRadius / L.cell;
+
+  // 16.1 一次调用里分流：空格画四角小角标，有棋子的格子画径向光晕
+  var mk = createStubContext();
+  R.drawMoveMarks(mk, L, moved, move, '#000', 0.44);
+  assert('起点已空 -> 四角小角标 4 个 moveTo', mk.calls.moveTo.length, 4);
+  assert('终点有子 -> 不再画角标', mk.calls.moveTo.length, 4);
+  assert('终点有子 -> 画径向光晕', mk.calls.gradients, 1);
+  assert('光晕填充一次', mk.calls.fill, 1);
+
+  // 16.2 小角标净空 0.22 格距 < 棋子半径 0.44 —— 正是它会被整块盖住的原因
+  var small = markExtent(mk.calls.moveTo, L, FROM);
+  approx('小角标外缘 0.22 格距', small.reach, 0.22, 0.01);
+  assert('小角标净空 < 棋子半径 -> 只能画在空格上', small.clear < pieceR, true);
+
+  // 16.3 光晕：以棋子为中心，覆盖到棋子轮廓之外才看得见
+  var glow = mk.calls.arc[0];
+  approx('光晕圆心 x 落在终点', glow[0], L.xOf(TO));
+  approx('光晕圆心 y 落在终点', glow[1], L.yOf(TO));
+  assert('光晕半径伸出棋子轮廓之外', glow[2] > L.pieceRadius, true);
+  approx('常亮态光晕半径 1.90 倍棋子半径', glow[2] / L.pieceRadius, 1.90, 0.01);
+
+  // 16.4 起势：boost 越大越亮、铺得越开，回落到常亮
+  var b0 = createStubContext();
+  R.drawPieceGlow(b0, L, TO, '#000', 0);
+  var b1 = createStubContext();
+  R.drawPieceGlow(b1, L, TO, '#000', 1);
+  assert('起势时光晕铺得更开', b1.calls.arc[0][2] > b0.calls.arc[0][2], true);
+  approx('满起势半径 2.30 倍棋子半径', b1.calls.arc[0][2] / L.pieceRadius, 2.30, 0.01);
+  approx('常亮态半径与单独调用一致', b0.calls.arc[0][2], glow[2], 0.01);
+
+  var bOver = createStubContext();
+  R.drawPieceGlow(bOver, L, TO, '#000', 5);
+  assert('boost 超过 1 被夹紧', bOver.calls.arc[0][2], b1.calls.arc[0][2]);
+
+  var bNeg = createStubContext();
+  R.drawPieceGlow(bNeg, L, TO, '#000', -1);
+  assert('负 boost 按常亮处理', bNeg.calls.arc[0][2], b0.calls.arc[0][2]);
+
+  var bUndef = createStubContext();
+  R.drawPieceGlow(bUndef, L, TO, '#000');
+  assert('省略 boost 仍是常亮（持续发光）', bUndef.calls.arc[0][2], b0.calls.arc[0][2]);
+
+  // 16.5 渐变由中心向外衰减到全透明（这才是「发光」而不是「描边」）
+  var grad = mk.calls.gradientsSpec[0];
+  assert('光晕用三段渐变', grad.stops.length, 3);
+  assert('内圈有色', /rgba\(/.test(grad.stops[0][1]), true);
+  assert('最外圈全透明', /,0\)$/.test(grad.stops[2][1]), true);
+  assert('外圈比内圈淡',
+    parseFloat(grad.stops[2][1].split(',')[3]) < parseFloat(grad.stops[0][1].split(',')[3]), true);
+
+  // 16.6 整盘绘制：光晕画在棋子之前（光从棋子底下透出来，不糊棋面）
+  var c = createStubContext();
+  R.draw(c, L, { board: moved, lastMove: move });
+  var cBase = createStubContext();
+  R.draw(cBase, L, { board: moved });
+  assert('整盘只比无标记时多出起点一个角标',
+    c.calls.moveTo.length - cBase.calls.moveTo.length, 4);
+
+  var glowArc = -1;
+  for (var i = 0; i < c.calls.arc.length; i++) {
+    if (Math.abs(c.calls.arc[i][2] - L.pieceRadius * 1.90) < 0.01) { glowArc = i; break; }
+  }
+  assert('整盘绘制中画出常亮光晕', glowArc >= 0, true);
+  assert('光晕位于棋子所在格', Math.abs(c.calls.arc[glowArc][0] - L.xOf(TO)) < 0.01, true);
+  // 楚河汉界占前 2 次 fillText，第 3 次起才是棋子
+  assert('光晕在楚河汉界之后',
+    orderIndexOf(c.calls, 'arc', glowArc) > orderIndexOf(c.calls, 'fillText', 1), true);
+  assert('光晕在第一枚棋子之前',
+    orderIndexOf(c.calls, 'arc', glowArc) < orderIndexOf(c.calls, 'fillText', 2), true);
+
+  // 16.7 起势：land 透传给光晕
+  var cBoost = createStubContext();
+  R.draw(cBoost, L, { board: moved, lastMove: move, land: 1 });
+  var boostArc = null;
+  for (i = 0; i < cBoost.calls.arc.length; i++) {
+    if (Math.abs(cBoost.calls.arc[i][2] - L.pieceRadius * 2.30) < 0.01) { boostArc = cBoost.calls.arc[i]; break; }
+  }
+  assert('land=1 时光晕按起势半径绘制', !!boostArc, true);
+
+  // 16.8 提示着法同理：起点有子用光晕，落点为空用小角标
+  var HINT_FROM = C.idxOf(1, 7);   // 红炮，有子
+  var HINT_TO = C.idxOf(1, 5);     // 空位
+  var h = createStubContext();
+  R.drawMoveMarks(h, L, board, { from: HINT_FROM, to: HINT_TO }, '#000', 0.34);
+  assert('提示起点有子 -> 光晕', h.calls.gradients, 1);
+  assert('提示落点为空 -> 小角标', h.calls.moveTo.length, 4);
+  approx('提示光晕落在起点', h.calls.arc[0][0], L.xOf(HINT_FROM));
+
+  // 16.9 无着法时不画任何标记
+  var none = createStubContext();
+  R.drawMoveMarks(none, L, board, null, '#000', 0.44);
+  assert('无着法不画角标', none.calls.moveTo.length, 0);
+  assert('无着法不画光晕', none.calls.gradients, 0);
+})();
+
+console.log('\n[17] 主题色派生透明度');
+(function () {
+  assert('六位十六进制', R.withAlpha('#e9a834', 0.5), 'rgba(233,168,52,0.5)');
+  assert('rgba 改写透明度', R.withAlpha('rgba(30,136,229,0.92)', 0.25), 'rgba(30,136,229,0.25)');
+  assert('rgb 补透明度', R.withAlpha('rgb(1,2,3)', 0.4), 'rgba(1,2,3,0.4)');
+  assert('无法识别时原样返回', R.withAlpha('gold', 0.5), 'gold');
+  assert('主题色都能派生', /^rgba\(/.test(R.withAlpha(R.THEME.lastMove, 0.3)), true);
 })();
 
 console.log('\n----------------------------------------');

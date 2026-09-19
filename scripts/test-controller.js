@@ -375,6 +375,7 @@ console.log('\n[9] renderState 组装');
   assert('默认无提示', st.hint, null);
   assert('默认无拖拽子', st.moving, null);
   assert('默认无走子动画', st.anim, null);
+  assert('默认无落子余晖', st.land, 0);
 
   // 9.2 选中态
   s.ctrl.select(PAWN);
@@ -625,6 +626,55 @@ console.log('\n[14] 走子动画：把「正在移动的棋子」交给渲染层
   assert('finishAnim 不触发 onAnimEnd', endCount, 0);
   fin.ctrl.tick(500);
   assert('finishAnim 后再 tick 也不触发', endCount, 0);
+})();
+
+console.log('\n[15] 落子余晖：落定后把视线钉在刚落的那枚子上');
+(function () {
+  // 15.1 初始无余晖
+  var s = mkController();
+  assert('初始余晖为 0', s.ctrl.land, 0);
+  assert('初始不在余晖中', s.ctrl.isLanding(), false);
+  assert('导出的余晖时长', Controller.LAND_DURATION, 360);
+
+  // 15.2 动画期间不亮，落定那一刻才满格
+  s.ctrl.requestMove(PAWN, PAWN_TO);
+  assert('动画期间余晖为 0', s.ctrl.land, 0);
+  s.ctrl.tick(Controller.MOVE_DURATION);
+  assert('落定即满格余晖', s.ctrl.land, 1);
+  truthy('落定后处于余晖中', s.ctrl.isLanding());
+  assert('renderState 透传余晖', s.ctrl.renderState().land, 1);
+
+  // 15.3 按帧衰减并归零，不会变负
+  s.ctrl.tick(Controller.LAND_DURATION / 2);
+  approx('半程衰减到 0.5', s.ctrl.land, 0.5);
+  s.ctrl.tick(Controller.LAND_DURATION / 2);
+  assert('走完归零', s.ctrl.land, 0);
+  assert('归零后不再处于余晖中', s.ctrl.isLanding(), false);
+  s.ctrl.tick(5000);
+  assert('归零后不再变负', s.ctrl.land, 0);
+
+  // 15.4 余晖只是视觉，不拦输入（拦输入的只有走子动画）
+  var i = mkController();
+  i.ctrl.requestMove(PAWN, PAWN_TO);
+  i.ctrl.tick(Controller.MOVE_DURATION);
+  truthy('落定后处于余晖中', i.ctrl.isLanding());
+  assert('余晖期间仍可操作', i.ctrl.canOperate(), true);
+  var bp = at(i.layout, 27);
+  assert('余晖期间可按下', i.ctrl.touchStart(bp.x, bp.y), true);
+  assert('余晖期间可选中黑兵', i.ctrl.selected, 27);
+
+  // 15.5 reset / setGame 清空余晖
+  var r = mkController();
+  r.ctrl.requestMove(PAWN, PAWN_TO);
+  r.ctrl.tick(Controller.MOVE_DURATION);
+  r.ctrl.reset();
+  assert('reset 清空余晖', r.ctrl.land, 0);
+
+  var g = mkController();
+  g.ctrl.requestMove(PAWN, PAWN_TO);
+  g.ctrl.tick(Controller.MOVE_DURATION);
+  g.ctrl.setGame(new Game());
+  assert('setGame 清空余晖', g.ctrl.land, 0);
 })();
 
 console.log('\n----------------------------------------');

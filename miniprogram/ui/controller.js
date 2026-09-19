@@ -25,6 +25,9 @@ var DRAG_RATIO = 0.35;
 /** 走子动画时长（毫秒） */
 var MOVE_DURATION = 200;
 
+/** 落子起势时长（毫秒）：棋子落定后光晕由亮到常亮的回落时间 */
+var LAND_DURATION = 360;
+
 /**
  * @constructor
  * @param {Layout} layout
@@ -55,6 +58,8 @@ function Controller(layout, game, options) {
   this.pulse = 0;
   /** 走子动画 {from,to,piece,captured,t,dur}，null 表示无动画 */
   this.anim = null;
+  /** 光晕起势强度 1~0：棋子落定时置 1 后按帧回落，让刚落的那枚子被看见 */
+  this.land = 0;
 }
 
 /** 是否允许本地操作（对局未结束、动画已落定且外部许可） */
@@ -80,6 +85,7 @@ Controller.prototype.reset = function () {
   this.hint = null;
   this.pulse = 0;
   this.anim = null;
+  this.land = 0;
   return this;
 };
 
@@ -157,6 +163,11 @@ Controller.prototype.isAnimating = function () {
   return !!this.anim;
 };
 
+/** 是否还在落子起势里（只影响重绘，不拦输入） */
+Controller.prototype.isLanding = function () {
+  return this.land > 0;
+};
+
 /** 立即结束走子动画（直接落定，不触发 onAnimEnd） */
 Controller.prototype.finishAnim = function () {
   var anim = this.anim;
@@ -176,7 +187,7 @@ Controller.prototype.setHint = function (hint) {
   return this.hint;
 };
 
-/** 推进将军脉冲与走子动画（由页面按帧驱动） */
+/** 推进将军脉冲、走子动画与落子余晖（由页面按帧驱动） */
 Controller.prototype.tick = function (dt) {
   var ms = dt || 16;
 
@@ -184,12 +195,19 @@ Controller.prototype.tick = function (dt) {
   this.pulse += step;
   if (this.pulse > 1) this.pulse -= Math.floor(this.pulse);
 
+  // 先衰减余晖，再处理动画：本帧刚落定的棋子余晖从满格开始，不丢首帧
+  if (this.land > 0) {
+    this.land -= ms / LAND_DURATION;
+    if (this.land < 0) this.land = 0;
+  }
+
   var anim = this.anim;
   if (anim) {
     anim.t += ms / anim.dur;
     if (anim.t >= 1) {
       anim.t = 1;
       this.anim = null;
+      this.land = 1;   // 落定：余晖起，把视线钉在这枚棋子上
       // 动画播完才通知外部（AI 回手、终局弹窗都等棋子落定）
       if (this.options.onAnimEnd) this.options.onAnimEnd(anim);
     }
@@ -332,7 +350,9 @@ Controller.prototype.renderState = function () {
     anim: anim ? {
       from: anim.from, to: anim.to, piece: anim.piece,
       captured: anim.captured, t: anim.t
-    } : null
+    } : null,
+    // 落子余晖进度，配合 lastMove.to 高亮刚落定的那枚棋子
+    land: this.land
   };
 };
 
@@ -344,3 +364,4 @@ Controller.prototype.render = function (ctx, renderer) {
 module.exports = Controller;
 module.exports.DRAG_RATIO = DRAG_RATIO;
 module.exports.MOVE_DURATION = MOVE_DURATION;
+module.exports.LAND_DURATION = LAND_DURATION;
