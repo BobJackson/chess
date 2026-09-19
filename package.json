@@ -1,7 +1,7 @@
 {
-  "name": "wechat-chess",
+  "name": "songfeng-guiyue",
   "version": "1.0.0",
-  "description": "微信小程序中国象棋：人机对战 + 本地双人 + 好友联机",
+  "description": "松风桂月：松树与桂花的象棋——微信小游戏（人机对战 + 本地双人 + 好友联机）",
   "private": true,
   "scripts": {
     "test": "node scripts/test-engine.js && node scripts/test-ai.js && node scripts/test-game.js && node scripts/test-ui.js && node scripts/test-controller.js && node scripts/test-net.js && node scripts/test-cloud.js && node scripts/test-ws.js && node scripts/test-audio.js && node scripts/test-page.js",

@@ -55,7 +55,7 @@ var app = {
   shareRoom: function (code) {
     if (!wx.shareAppMessage) return false;
     wx.shareAppMessage({
-      title: '来和我下盘中国象棋 · 房间 ' + code,
+      title: '松风起，桂子落，来一盘 · 房间 ' + code,
       query: 'room=' + code
     });
     return true;
@@ -104,6 +104,21 @@ if (NET_CONFIG.kind === 'cloud') {
 } else {
   // ws 通道：要求配置了 wss 地址
   app.netReady = !!NET_CONFIG.wsUrl && NET_CONFIG.wsUrl.indexOf('wss://') === 0;
+}
+
+// 右上角菜单「发送给朋友」被动分享：等待对手时携带房间号，好友点开即可入房；
+// 无等待中会话时发通用邀请卡片（不带房间参数）
+if (wx.showShareMenu) {
+  try { wx.showShareMenu({ menus: ['shareAppMessage'] }); } catch (e) {}
+}
+if (wx.onShareAppMessage) {
+  wx.onShareAppMessage(function () {
+    var s = app.session;
+    if (s && s.room && s.state === 'waiting') {
+      return { title: '松风起，桂子落，来一盘 · 房间 ' + s.room, query: 'room=' + s.room };
+    }
+    return { title: '松风起，桂子落，来一盘', query: '' };
+  });
 }
 
 // ---------------------------------------------------------------------------

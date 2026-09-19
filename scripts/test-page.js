@@ -68,6 +68,7 @@ var shownModals = [];
 var shownToasts = [];
 var sharedCards = [];
 var showHandlers = [];
+var menuShareHandler = null;
 var keyboardShown = 0;
 
 /** 同步 thenable：让 promise 链在当前同步流程内执行，便于断言 */
@@ -160,6 +161,8 @@ global.wx = {
   offKeyboardInput: function () {},
   offKeyboardComplete: function () {},
   shareAppMessage: function (o) { sharedCards.push(o); },
+  showShareMenu: function () {},
+  onShareAppMessage: function (cb) { menuShareHandler = cb; },
   onShow: function (cb) { showHandlers.push(cb); },
   onHide: function () {},
   cloud: { database: function () { return fakeCloud.db; }, init: function () {} }
@@ -352,6 +355,36 @@ console.log('\n[6] 分享回流：好友点卡片自动加入');
   tap(back.x, back.y);
   assert('回到菜单', manager.current.name, 'menu');
   assert('房主收到离开通知', host.opponentConnected, false);
+})();
+
+console.log('\n[7] 菜单被动分享：等待中携带房间号');
+(function () {
+  truthy('onShareAppMessage 已注册', menuShareHandler);
+
+  // 无会话：通用邀请卡片，不带房间参数
+  app.session = null;
+  var generic = menuShareHandler();
+  assert('无会话时标题不含房间', /房间/.test(generic.title), false);
+  assert('无会话时 query 为空', generic.query, '');
+
+  // 房主等待中：菜单分享携带房间号，好友点开即可入房
+  var ht = new CloudTransport({ clientId: 'hostY' });
+  ht.attach('MN55');
+  var host = new OnlineSession(ht, { clientId: 'hostY' });
+  host.createRoom('MN55');
+  assert('房主等待中', host.state, 'waiting');
+  app.session = host;
+  var invite = menuShareHandler();
+  truthy('标题含房间号', invite.title.indexOf('MN55') >= 0);
+  assert('query 携带房间号', invite.query, 'room=MN55');
+
+  // 对局进行中（非 waiting）：不再暴露房间号，避免好友加入已满房间
+  host.state = 'playing';
+  var inGame = menuShareHandler();
+  assert('对局中 query 为空', inGame.query, '');
+
+  host.leave();
+  app.session = null;
 })();
 
 console.log('\n----------------------------------------');

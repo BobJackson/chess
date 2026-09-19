@@ -92,7 +92,7 @@ function createMenuScene(app) {
 
   scene.render = function (ctx, w, h) {
     W.fillBackground(ctx, w, h);
-    W.drawText(ctx, '中国象棋', w / 2, h * 0.14, 32, W.THEME.title, 'center', true);
+    W.drawText(ctx, '松风桂月', w / 2, h * 0.14, 32, W.THEME.title, 'center', true);
     W.drawText(ctx, '人机对战 · 本地双人 · 好友联机', w / 2, h * 0.14 + 30, 13, W.THEME.subtitle, 'center');
 
     W.drawText(ctx, 'AI 难度', scene.seg.x, scene.seg.y - 14, 13, W.THEME.body);

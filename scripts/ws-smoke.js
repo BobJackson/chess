@@ -6,6 +6,7 @@
  * 先启动服务端：docker run -p 127.0.0.1:18787:8787 chess-room  或  node server/room-server.js 18787
  */
 var net = require('net');
+var tls = require('tls');
 var crypto = require('crypto');
 var urlMod = require('url');
 
@@ -14,16 +15,22 @@ var TARGET = process.argv[2] || 'ws://127.0.0.1:18787/ws';
 function connect(room, clientId) {
   return new Promise(function (resolve, reject) {
     var u = urlMod.parse(TARGET + '?room=' + room);
-    var host = u.hostname, port = parseInt(u.port, 10) || 80;
+    var useTls = (u.protocol === 'wss:' || u.protocol === 'https:');
+    var host = u.hostname;
+    var port = parseInt(u.port, 10) || (useTls ? 443 : 80);
     var key = crypto.randomBytes(16).toString('base64');
-    var sock = net.connect(port, host, function () {
+    var onConnect = function () {
       sock.write(
         'GET ' + (u.pathname || '/') + '?room=' + room + ' HTTP/1.1\r\n' +
         'Host: ' + host + ':' + port + '\r\n' +
         'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
         'Sec-WebSocket-Key: ' + key + '\r\nSec-WebSocket-Version: 13\r\n\r\n'
       );
-    });
+    };
+    // wss 走 TLS（默认 443），ws 走明文 TCP（默认 80）
+    var sock = useTls
+      ? tls.connect(port, host, { servername: host }, onConnect)
+      : net.connect(port, host, onConnect);
     var buf = Buffer.alloc(0);
     var handshaken = false;
     var client = {
