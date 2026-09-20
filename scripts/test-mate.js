@@ -136,7 +136,7 @@ console.log('\n[4] 马位术语的「路 × 横线」换算');
 console.log('\n[5] 杀法清单与语音 key');
 (function () {
   var list = Mate.MATE_PATTERNS;
-  assert('清单共 11 项', list.length, 11);
+  assert('清单共 15 项', list.length, 15);
   var keys = {};
   var dup = null;
   list.forEach(function (p) {
@@ -191,6 +191,8 @@ console.log('\n[7] 多音字读音锁定（speech 同音替代）');
   // 车在象棋里读 jū，TTS 默认读 chē
   assert('双车错的朗读文本', byKey.shuangchecuo.speech, '双居错');
   assert('双车错的显示名不变', byKey.shuangchecuo.name, '双车错');
+  assert('夹车炮的朗读文本', byKey.jiachepao.speech, '夹居炮');
+  assert('夹车炮的显示名不变', byKey.jiachepao.name, '夹车炮');
 
   // 其余条目直接读名字，不需要替代
   var overridden = Mate.MATE_PATTERNS
@@ -198,7 +200,7 @@ console.log('\n[7] 多音字读音锁定（speech 同音替代）');
     .map(function (p) { return p.key; })
     .sort()
     .join(',');
-  assert('需要同音替代的只有这两个', overridden, 'chongpao,shuangchecuo');
+  assert('需要同音替代的就这三个', overridden, 'chongpao,jiachepao,shuangchecuo');
 
   // speech 若存在必须是非空字符串，且与原字不同（否则没有意义）
   var bad = null;
@@ -208,6 +210,64 @@ console.log('\n[7] 多音字读音锁定（speech 同音替代）');
     else if (p.speech === p.name) bad = p.key + ' 的 speech 与原字相同';
   });
   assert('speech 字段格式合法', bad, null);
+})();
+
+console.log('\n[8] 阵形型与几何型的撞名已解开');
+(function () {
+  // 这 5 种「阵形型」名字天然会与几何型重叠。解法是给几何型的判据补上区分性
+  // 条件，让各归各位——而不是拍一张优先级表。下面把每条区分条件钉住。
+  function cls(fen) {
+    var pos = new Position(fen);
+    assert('  该局确实是将死',
+      MG.isChecked(pos, C.BLACK) && !MG.hasLegalMove(pos, C.BLACK), true);
+    return Mate.classifyMate(pos, C.RED);
+  }
+
+  // 天地炮：中炮与沉底炮**两炮同时将军**。
+  // 闷宫的判据要求「单炮将军」，所以这里不该落到闷宫。
+  var tian = cls('C2aka3/4r4/9/9/4C4/9/9/9/9/5K3 b - - 0 1');
+  assert('两炮同时将军 -> 天地炮（不是闷宫）', tian && tian.name, '天地炮');
+  assert('天地炮的 key', tian && tian.key, 'tiandipao');
+  assert('天地炮带出两门炮', tian && tian.pieces.length, 2);
+
+  // 夹车炮：双炮并线 + 车参与封口。
+  // 重炮的判据要求「无车参与」，所以这里不该落到重炮。
+  var jia = cls('3aka3/R8/4C4/9/4C4/9/9/9/9/5K3 b - - 0 1');
+  assert('有车参与封口 -> 夹车炮（不是重炮）', jia && jia.name, '夹车炮');
+  assert('夹车炮带出双炮 + 车', jia && jia.pieces.length, 3);
+
+  // 海底捞月：将不在底线、将军子沉在底线正对将背后。
+  // 双车错的判据很松（另一车攻击将的相邻格），所以海底捞月必须排在它前面。
+  var hai = cls('4R4/2N1k4/R8/4N4/9/9/9/9/9/5K3 b - - 0 1');
+  assert('将军子沉底在将背后 -> 海底捞月（不是双车错）', hai && hai.name, '海底捞月');
+
+  // 空头炮：不给它判据。
+  // 炮与将同一直线、中间无子，看着像「空头炮」，但炮要炮架才能吃子——
+  // 没有炮架它既将军不了也封不住格子，在终局里是个旁观者。
+  // 把那一枚炮整枚拿掉，局面照样是将死，足以证明它没参与这一杀。
+  var kong = 'R3k4/9/9/3NC4/9/9/9/9/9/5K3 b - - 0 1';
+  var kongOff = 'R3k4/9/9/3N5/9/9/9/9/9/5K3 b - - 0 1';
+  function isMate(fen) {
+    var p = new Position(fen);
+    return MG.isChecked(p, C.BLACK) && !MG.hasLegalMove(p, C.BLACK);
+  }
+  assert('带空头炮的局面是将死', isMate(kong), true);
+  assert('拿掉空头炮后仍是将死', isMate(kongOff), true);
+  assert('空头炮不参与杀 -> 不命名', Mate.classifyMate(new Position(kong), C.RED), null);
+
+  // 铁门栓：中炮 + 车占将门
+  var tie = cls('3aka3/4R4/9/3N5/9/4C4/9/9/9/5K3 b - - 0 1');
+  assert('中炮 + 车封将门 -> 铁门栓', tie && tie.name, '铁门栓');
+  assert('铁门栓的将军子是那辆车', tie && C.rankOf(tie.checker), 1);
+
+  // 对照：铁门栓那局的中炮**是参与杀的**——拿掉它就不再是将死，
+  // 因为士可以吃车解将，正是中炮隔车将军拦着。
+  assert('铁门栓的中炮参与杀（拿掉就不成杀）', isMate('3aka3/4R4/9/3N5/9/9/9/9/9/5K3 b - - 0 1'), false);
+
+  // 反向：同样是「车占住将门将军」，但没有中炮 -> 不该套铁门栓，落到双车错。
+  var noCannon = cls('R3k4/4R4/9/3N5/9/9/9/9/9/5K3 b - - 0 1');
+  assert('没有中炮 -> 不是铁门栓', noCannon && noCannon.key !== 'tiemenshuan', true);
+  assert('没有中炮时归双车错', noCannon && noCannon.name, '双车错');
 })();
 
 console.log('\n----------------------------------------');

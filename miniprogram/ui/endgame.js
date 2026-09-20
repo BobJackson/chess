@@ -328,8 +328,21 @@ function drawMotif(ctx, L, info, p) {
     closingBox(ctx, L, info.king, clamp01((p - 0.45) / 0.55));
     return;
   }
-  if (key === 'shuangchecuo') {
-    crossSweep(ctx, L, info, p);
+  if (key === 'shuangchecuo' || key === 'tiandipao' || key === 'jiachepao') {
+    // 都是「几枚子各拉一条线指向将」：双车错两条、天地炮两条、夹车炮三条
+    sweepFromPieces(ctx, L, info, p);
+    return;
+  }
+  if (key === 'tiemenshuan') {
+    // 门闩落下 + 车与中炮各拉一条线
+    doorBar(ctx, L, info.checker, clamp01(p / 0.6));
+    sweepFromPieces(ctx, L, info, p);
+    return;
+  }
+  if (key === 'haidilaoyue') {
+    // 底线那条将军线 + 一弯月弧兜住将（「捞月」的意象）
+    sweepToKing(ctx, L, info, p, {});
+    crescent(ctx, L, info.king, clamp01((p - 0.55) / 0.45));
     return;
   }
   if (key === 'wocaoma' || key === 'guajiaoma' || key === 'diaoyuma' || key === 'cemianhu') {
@@ -363,19 +376,51 @@ function sweepToKing(ctx, L, info, p, opts) {
   }
 }
 
-/** 双车错：两条车的攻击线交叉扫过 */
-function crossSweep(ctx, L, info, p) {
+/** 几枚子各拉一条线指向将（双车错 / 天地炮 / 夹车炮共用） */
+function sweepFromPieces(ctx, L, info, p) {
   var pieces = info.pieces || [];
   var b = L.pointOf(info.king);
-  for (var i = 0; i < pieces.length && i < 2; i++) {
+  for (var i = 0; i < pieces.length; i++) {
     var a = L.pointOf(pieces[i]);
-    // 第二条线晚一拍起步，形成「交错」而不是同时
-    var q = clamp01((p - i * 0.22) / (1 - i * 0.22));
+    // 逐条错开一拍起步，形成「交替配合」而不是同时
+    var q = clamp01((p - i * 0.18) / (1 - i * 0.18));
     if (q <= 0) continue;
-    var x = a.x + (b.x - a.x) * q;
-    var y = a.y + (b.y - a.y) * q;
-    glowLine(ctx, L, a.x, a.y, x, y, 0.05);
+    glowLine(ctx, L, a.x, a.y, a.x + (b.x - a.x) * q, a.y + (b.y - a.y) * q, 0.05);
   }
+}
+
+/** 门闩：在将门那一格横一道粗线，像落下的门闩 */
+function doorBar(ctx, L, doorIdx, p) {
+  if (p <= 0) return;
+  var pt = L.pointOf(doorIdx);
+  var half = L.pieceRadius * (0.45 + 0.75 * p);
+
+  ctx.save();
+  ctx.globalAlpha = 0.35 + 0.65 * p;
+  ctx.strokeStyle = FX.line;
+  ctx.lineWidth = Math.max(2, L.cell * 0.09);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(pt.x - half, pt.y);
+  ctx.lineTo(pt.x + half, pt.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 月牙：海底捞月的意象——一弯月弧从将的下方兜上来 */
+function crescent(ctx, L, kingIdx, p) {
+  if (p <= 0) return;
+  var pt = L.pointOf(kingIdx);
+  var r = L.cell * (0.52 + 0.32 * p);
+
+  ctx.save();
+  ctx.globalAlpha = 0.55 * p;
+  ctx.strokeStyle = FX.line;
+  ctx.lineWidth = Math.max(1, L.cell * 0.05);
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, r, Math.PI * 0.18, Math.PI * 0.82);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** 马系：从马到将画一条「日」字轨迹（先走长边，再走短边） */

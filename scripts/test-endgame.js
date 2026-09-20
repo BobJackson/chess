@@ -182,7 +182,9 @@ console.log('\n[3] 11 种杀法的母题各自画在正确的位置');
   /** 母题的第一笔应该从哪一枚棋子出发 */
   function motifStart(info) {
     // 将帅照面没有将军子、二鬼拍门从兵出发，其余都从将军子出发
-    if (info.key === 'duimianxiao' || info.key === 'erguipaimen') return info.pieces[0];
+    if (info.key === 'duimianxiao' || info.key === 'erguipaimen') {
+      return info.pieces[0];
+    }
     return info.checker;
   }
 
@@ -199,8 +201,11 @@ console.log('\n[3] 11 种杀法的母题各自画在正确的位置');
     truthy(cs.name + ' · 母题画了线', ctx.calls.moveTo.length > 0);
 
     var want = motifStart(info);
-    approx(cs.name + ' · 母题起点 x', ctx.calls.moveTo[0][0], L.xOf(want));
-    approx(cs.name + ' · 母题起点 y', ctx.calls.moveTo[0][1], L.yOf(want));
+    // 容差半格多：有的母题第一笔不是格心（如铁门栓画的是门闩的左端）。
+    // 但错格至少偏一格、坐标算错则是 NaN，都会被这条逮住。
+    var tol = L.cell * 0.6;
+    approx(cs.name + ' · 母题起点落在关键子附近 x', ctx.calls.moveTo[0][0], L.xOf(want), tol);
+    approx(cs.name + ' · 母题起点落在关键子附近 y', ctx.calls.moveTo[0][1], L.yOf(want), tol);
   });
 })();
 

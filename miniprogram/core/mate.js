@@ -2,9 +2,23 @@
  * 杀法识别（绝杀命名）
  *
  * 输入一个「已经走完最后一步」的局面，判断这盘棋的杀法叫什么名字。
- * 只覆盖**名字由终局几何唯一决定**的那一类——名字本身就是在描述终局形态，
- * 所以判得出来；至于「大胆穿心」「炮碾丹砂」这类描述攻杀过程的名字，
- * 终局里已经没有任何信息可以还原，一律不猜（返回 null）。
+ *
+ * 认得 15 种，分两类：
+ *   几何型（11）—— 名字描述终局形态，判据唯一：对面笑、马后炮、重炮、闷宫、
+ *                  双车错、卧槽马、挂角马、钓鱼马、侧面虎、二鬼拍门、闷杀
+ *   阵形型（4） —— 名字描述攻杀阵形，天然会与几何型重叠：天地炮、夹车炮、
+ *                  铁门栓、海底捞月
+ *
+ * 两类都不认的，是名字描述「过程」或「威胁」的那些：「大胆穿心」「炮碾丹砂」讲的是
+ * 怎么杀的，「空头炮」讲的是一个阵形威胁（详见下文 matchKongtoupao 处的说明）——
+ * 终局里都已无从还原，一律不猜。
+ *
+ * ── 撞名怎么解 ──
+ * 阵形型与几何型会重叠（同一个终局既像闷宫又像天地炮）。解法不是拍一张优先级表，
+ * 而是给判据补上**区分性条件**，让每种各归各位：
+ *   闷宫要求「**单炮**将军」——两炮同时将军是天地炮，不是闷宫
+ *   重炮要求「**无车参与**」——有车参与封口就是夹车炮
+ * 剩下少量顺序依赖，用 MATCHERS 的排列显式表达：越具体的排越前。
  *
  * 判据用到的坐标记法（攻击方看「路」，防守方看「横线」）：
  *   路   = 攻击方纵线编号：红攻黑时 路 = 9 - file；黑攻红时 路 = file + 1
@@ -17,12 +31,12 @@
 var C = require('./constants.js');
 var MG = require('./movegen.js');
 
-/** 棋子类型（绝对值）：车 5 / 炮 6 / 马 4 / 兵 7 / 士 2 */
+/** 棋子类型（绝对值）：士 2 / 马 4 / 车 5 / 炮 6 / 兵 7 */
+var ADVISOR = 2;
+var KNIGHT = 4;
 var ROOK = 5;
 var CANNON = 6;
-var KNIGHT = 4;
 var PAWN = 7;
-var ADVISOR = 2;
 
 /**
  * 本模块认得的全部杀法
@@ -32,8 +46,7 @@ var ADVISOR = 2;
  * speech 是给语音合成用的**同音替代文本**，只在朗读时生效，显示仍然是 name。
  * 中文里多音字很多，TTS 会挑最常用的读音，象棋术语常常不是那一个：
  *   重炮 -> 读 chóng（叠炮、两炮并线），不是 zhòng
- *   双车错 -> 车在象棋里读 jū，不是 chē
- * 用同音字「按构造」锁死读音，比依赖 TTS 的上下文判断可靠。
+ *   双车错 / 夹车炮 -> 车在象棋里读 jū，不是 chē
  */
 var MATE_PATTERNS = [
   { key: 'duimianxiao', name: '对面笑' },
@@ -46,7 +59,11 @@ var MATE_PATTERNS = [
   { key: 'diaoyuma', name: '钓鱼马' },
   { key: 'cemianhu', name: '侧面虎' },
   { key: 'erguipaimen', name: '二鬼拍门' },
-  { key: 'mensha', name: '闷杀' }
+  { key: 'mensha', name: '闷杀' },
+  { key: 'tiandipao', name: '天地炮' },
+  { key: 'jiachepao', name: '夹车炮', speech: '夹居炮' },
+  { key: 'tiemenshuan', name: '铁门栓' },
+  { key: 'haidilaoyue', name: '海底捞月' }
 ];
 
 var BY_KEY = {};
@@ -102,25 +119,20 @@ function between(a, b) {
   return null;
 }
 
-/**
- * 正在将军的棋子索引（可能不止一枚）
- *
- * 用「攻击方的合法走法里，终点是被将方将/帅」来反查——这样被牵制的子
- * 不会被误判成将军子。
- */
-function findCheckers(pos, atkSide) {
-  var kingIdx = pos.kingPos[1 - atkSide];
-  if (kingIdx < 0) return [];
+/** 两格是否正交相邻（上下左右紧贴） */
+function isAdjacent(a, b) {
+  return Math.abs(C.fileOf(a) - C.fileOf(b)) + Math.abs(C.rankOf(a) - C.rankOf(b)) === 1;
+}
 
-  var moves = MG.genLegalMoves(pos, atkSide);
-  var seen = {};
+/** 将/帅的相邻格 */
+function kingNeighbors(kingIdx) {
+  var f = C.fileOf(kingIdx), r = C.rankOf(kingIdx);
+  var cand = [[f - 1, r], [f + 1, r], [f, r - 1], [f, r + 1]];
   var out = [];
-  for (var i = 0; i < moves.length; i++) {
-    var from = MG.moveFrom(moves[i]);
-    if (MG.moveTo(moves[i]) !== kingIdx) continue;
-    if (seen[from]) continue;
-    seen[from] = 1;
-    out.push(from);
+  for (var i = 0; i < cand.length; i++) {
+    var cf = cand[i][0], cr = cand[i][1];
+    if (cf < 0 || cf > C.FILES - 1 || cr < 0 || cr > C.RANKS - 1) continue;
+    out.push(C.idxOf(cf, cr));
   }
   return out;
 }
@@ -148,21 +160,31 @@ function rookAttacks(board, from, to) {
   return true;
 }
 
-/** 将/帅的相邻格（含九宫约束之外的过滤交给调用方） */
-function kingNeighbors(kingIdx) {
-  var f = C.fileOf(kingIdx), r = C.rankOf(kingIdx);
-  var cand = [[f - 1, r], [f + 1, r], [f, r - 1], [f, r + 1]];
+/**
+ * 正在将军的棋子索引（可能不止一枚）
+ *
+ * 用「攻击方的合法走法里，终点是被将方将/帅」来反查——这样被牵制的子
+ * 不会被误判成将军子。
+ */
+function findCheckers(pos, atkSide) {
+  var kingIdx = pos.kingPos[1 - atkSide];
+  if (kingIdx < 0) return [];
+
+  var moves = MG.genLegalMoves(pos, atkSide);
+  var seen = {};
   var out = [];
-  for (var i = 0; i < cand.length; i++) {
-    var cf = cand[i][0], cr = cand[i][1];
-    if (cf < 0 || cf > C.FILES - 1 || cr < 0 || cr > C.RANKS - 1) continue;
-    out.push(C.idxOf(cf, cr));
+  for (var i = 0; i < moves.length; i++) {
+    var from = MG.moveFrom(moves[i]);
+    if (MG.moveTo(moves[i]) !== kingIdx) continue;
+    if (seen[from]) continue;
+    seen[from] = 1;
+    out.push(from);
   }
   return out;
 }
 
 /**
- * 马位术语：由「路 × 横线」查名字
+ * 马的方位术语：由「路 × 横线」查名字
  * @returns {?string} 不在任何有名格位上时返回 null
  */
 function horseTerm(file, rank, atkSide, defSide) {
@@ -196,30 +218,353 @@ var HORSE_MATE_KEY = {
   '侧面虎': 'cemianhu'
 };
 
-/** 两格是否正交相邻（上下左右紧贴） */
-function isAdjacent(a, b) {
-  return Math.abs(C.fileOf(a) - C.fileOf(b)) + Math.abs(C.rankOf(a) - C.rankOf(b)) === 1;
+// ---------------------------------------------------------------------------
+// 局面查询：判据的共用底座
+// ---------------------------------------------------------------------------
+
+/**
+ * 炮与将之间恰好一个子时返回该子的索引，否则返回 -1
+ *
+ * 这是炮能将军的必要条件，多个炮系判据都以它起步。
+ */
+function cannonScreen(ctx, cannonIdx) {
+  var line = between(cannonIdx, ctx.kingIdx);
+  if (!line) return -1;
+  var found = -1;
+  for (var i = 0; i < line.length; i++) {
+    if (ctx.board[line[i]] === C.EMPTY) continue;
+    if (found >= 0) return -1;
+    found = line[i];
+  }
+  return found;
+}
+
+/** 正在将军的炮有几门（闷宫要求「单炮」） */
+function cannonsChecking(ctx) {
+  var n = 0;
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    if (abs(ctx.board[ctx.checkers[i]]) === CANNON) n++;
+  }
+  return n;
+}
+
+/**
+ * 己方是否有车参与封口（攻击将的某个相邻格）
+ * @returns {number} 车的位置，没有则 -1
+ */
+function rookInNet(ctx) {
+  var rooks = piecesOf(ctx.pos, ctx.atkSide, ROOK);
+  var around = kingNeighbors(ctx.kingIdx);
+  for (var i = 0; i < rooks.length; i++) {
+    for (var j = 0; j < around.length; j++) {
+      if (rookAttacks(ctx.board, rooks[i], around[j])) return rooks[i];
+    }
+  }
+  return -1;
 }
 
 /** 将的每个可走相邻格是否都被自己人占着（走不动 = 被自家子堵死） */
-function selfBlocked(pos, defSide, kingIdx) {
-  var neighbors = kingNeighbors(kingIdx);
+function selfBlocked(ctx) {
+  var neighbors = kingNeighbors(ctx.kingIdx);
   var any = false;
   for (var i = 0; i < neighbors.length; i++) {
     var idx = neighbors[i];
-    var f = C.fileOf(idx), r = C.rankOf(idx);
-    // 将只能在九宫内走
-    if (!C.inPalace(f, r, defSide)) continue;
+    if (!C.inPalace(C.fileOf(idx), C.rankOf(idx), ctx.defSide)) continue;
     any = true;
-    var p = pos.board[idx];
-    if (p === C.EMPTY || C.sideOf(p) !== defSide) return false;
+    var p = ctx.board[idx];
+    if (p === C.EMPTY || C.sideOf(p) !== ctx.defSide) return false;
   }
   return any;
+}
+
+/** 防守方的底线 */
+function backRankOf(defSide) {
+  return defSide === C.BLACK ? 0 : C.RANKS - 1;
+}
+
+/** 第一枚将军子（用于「随便哪个将军子」的判据） */
+function firstChecker(ctx) {
+  return ctx.checkers.length ? ctx.checkers[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// 各杀法的判据：每条只回答「是不是我」
+// ---------------------------------------------------------------------------
+
+/** 对面笑：没有任何子力将军，唯一的将军来源就是「帅/将」本身 */
+function matchDuimianxiao(ctx) {
+  if (ctx.checkers.length) return null;
+  if (!MG.kingsAreFacing(ctx.pos)) return null;
+  return pattern('duimianxiao', '将帅照面，帅（将）本身封死退路', {
+    king: ctx.kingIdx,
+    pieces: [ctx.pos.kingPos[ctx.atkSide], ctx.kingIdx]
+  });
+}
+
+/** 马后炮：炮的炮架是己方马 */
+function matchMahoupao(ctx) {
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== CANNON) continue;
+    var scr = cannonScreen(ctx, from);
+    if (scr < 0) continue;
+    if (C.sideOf(ctx.board[scr]) !== ctx.atkSide) continue;
+    if (abs(ctx.board[scr]) !== KNIGHT) continue;
+    return pattern('mahoupao', '炮以己方马为架', {
+      checker: from, screen: scr, king: ctx.kingIdx, pieces: [from, scr]
+    });
+  }
+  return null;
+}
+
+/** 马系：由落点的马位术语决定（格位唯一，不会与别的判据混淆） */
+function matchKnight(ctx) {
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== KNIGHT) continue;
+    var term = horseTerm(C.fileOf(from), C.rankOf(from), ctx.atkSide, ctx.defSide);
+    var key = term ? HORSE_MATE_KEY[term] : null;
+    if (!key) continue;
+    return pattern(key, '马踏' + term + '位', {
+      checker: from, king: ctx.kingIdx, pieces: [from]
+    });
+  }
+  return null;
+}
+
+/**
+ * 闷宫：炮架是**敌方的士**、将紧贴炮架，且是**单炮**将军
+ *
+ * 「单炮」这条区分性条件很关键：两炮同时将军是天地炮，不该叫闷宫。
+ */
+function matchMengong(ctx) {
+  if (cannonsChecking(ctx) !== 1) return null;
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== CANNON) continue;
+    var scr = cannonScreen(ctx, from);
+    if (scr < 0) continue;
+    if (C.sideOf(ctx.board[scr]) === ctx.atkSide) continue;
+    if (abs(ctx.board[scr]) !== ADVISOR) continue;
+    if (!isAdjacent(scr, ctx.kingIdx)) continue;
+    return pattern('mengong', '炮以敌方士为架，将紧贴炮架被堵死', {
+      checker: from, screen: scr, king: ctx.kingIdx, pieces: [from, scr]
+    });
+  }
+  return null;
+}
+
+/**
+ * 重炮：炮架是己方炮，且**没有车参与**封口
+ *
+ * 「无车参与」用来把夹车炮让出来——双炮并线时若还有车配合，那是夹车炮。
+ */
+function matchChongpao(ctx) {
+  if (rookInNet(ctx) >= 0) return null;
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== CANNON) continue;
+    var scr = cannonScreen(ctx, from);
+    if (scr < 0) continue;
+    if (C.sideOf(ctx.board[scr]) !== ctx.atkSide) continue;
+    if (abs(ctx.board[scr]) !== CANNON) continue;
+    return pattern('chongpao', '两炮并线，以己方炮为架', {
+      checker: from, screen: scr, king: ctx.kingIdx, pieces: [from, scr]
+    });
+  }
+  return null;
+}
+
+/** 闷杀：炮架是士以外的敌子（士做架且将紧贴已归闷宫） */
+function matchMensha(ctx) {
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== CANNON) continue;
+    var scr = cannonScreen(ctx, from);
+    if (scr < 0) continue;
+    if (C.sideOf(ctx.board[scr]) === ctx.atkSide) continue;
+    return pattern('mensha', '炮借敌子为架，将被自家子堵死', {
+      checker: from, screen: scr, king: ctx.kingIdx, pieces: [from, scr]
+    });
+  }
+  return null;
+}
+
+/** 铁门栓：中炮（在将的纵线上）+ 车或兵占住将门（将正前方那格）将军 */
+function matchTiemenshuan(ctx) {
+  var kingFile = C.fileOf(ctx.kingIdx);
+  var middles = piecesOf(ctx.pos, ctx.atkSide, CANNON).filter(function (c) {
+    return C.fileOf(c) === kingFile;
+  });
+  if (!middles.length) return null;
+
+  var doorRank = C.rankOf(ctx.kingIdx) + (ctx.defSide === C.BLACK ? 1 : -1);
+  if (doorRank < 0 || doorRank > C.RANKS - 1) return null;
+  var door = C.idxOf(kingFile, doorRank);
+
+  var p = ctx.board[door];
+  if (p === C.EMPTY || C.sideOf(p) !== ctx.atkSide) return null;
+  var t = abs(p);
+  if (t !== ROOK && t !== PAWN) return null;
+  if (ctx.checkers.indexOf(door) < 0) return null;
+
+  return pattern('tiemenshuan', '中炮镇中路，车（兵）封住将门', {
+    checker: door, king: ctx.kingIdx, pieces: [door, middles[0]]
+  });
+}
+
+/** 海底捞月：将军子沉在对方底线、正对将的背后（将本身不在底线） */
+function matchHaidilaoyue(ctx) {
+  var back = backRankOf(ctx.defSide);
+  if (C.rankOf(ctx.kingIdx) === back) return null;
+  var kingFile = C.fileOf(ctx.kingIdx);
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var c = ctx.checkers[i];
+    if (C.rankOf(c) === back && C.fileOf(c) === kingFile) {
+      return pattern('haidilaoyue', '子力沉底，在将的背后发起攻击', {
+        checker: c, king: ctx.kingIdx, pieces: [c]
+      });
+    }
+  }
+  return null;
+}
+
+/** 天地炮：中炮（天炮）在将的纵线 + 沉底炮（地炮）在对方底线 */
+function matchTiandipao(ctx) {
+  var cannons = piecesOf(ctx.pos, ctx.atkSide, CANNON);
+  if (cannons.length < 2) return null;
+
+  var back = backRankOf(ctx.defSide);
+  var kingFile = C.fileOf(ctx.kingIdx);
+  var middle = -1, bottom = -1;
+  for (var i = 0; i < cannons.length; i++) {
+    if (middle < 0 && C.fileOf(cannons[i]) === kingFile) middle = cannons[i];
+    if (bottom < 0 && C.rankOf(cannons[i]) === back) bottom = cannons[i];
+  }
+  if (middle < 0 || bottom < 0 || middle === bottom) return null;
+  if (ctx.checkers.indexOf(middle) < 0 && ctx.checkers.indexOf(bottom) < 0) return null;
+
+  return pattern('tiandipao', '中炮（天炮）镇中路，沉底炮（地炮）控底线', {
+    checker: middle, king: ctx.kingIdx, pieces: [middle, bottom]
+  });
+}
+
+/** 夹车炮：双炮并线，且有车参与封口 */
+function matchJiachepao(ctx) {
+  var cannons = piecesOf(ctx.pos, ctx.atkSide, CANNON);
+  if (cannons.length < 2) return null;
+
+  var pair = null;
+  for (var i = 0; i < cannons.length && !pair; i++) {
+    for (var j = i + 1; j < cannons.length; j++) {
+      if (between(cannons[i], cannons[j])) { pair = [cannons[i], cannons[j]]; break; }
+    }
+  }
+  if (!pair) return null;
+
+  var rk = rookInNet(ctx);
+  if (rk < 0) return null;
+  if (ctx.checkers.indexOf(pair[0]) < 0 && ctx.checkers.indexOf(pair[1]) < 0) return null;
+
+  return pattern('jiachepao', '双炮并线，与车交替配合', {
+    checker: pair[0], king: ctx.kingIdx, pieces: [pair[0], pair[1], rk]
+  });
+}
+
+/*
+ * ── 为什么不认「空头炮」──
+ *
+ * 空头炮（炮与将同一直线、中间无子）**只是个威胁，本身不构成绝杀**：
+ * 炮要炮架才能吃子，没有炮架它既将军不了、也封不住任何格子，在终局里是个旁观者。
+ *
+ * 实测过：拿一个「车沿底线将军 + 马封中格」的将死局面，把那门空头炮**整枚拿掉，
+ * 局面照样是将死**——说明它没有参与这一杀。给一个没参与的棋子命名，正是
+ * 「宁可少说不能说错」要避免的，所以这里不给它判据。
+ *
+ * 这与「天地炮」等其余四种阵形型的区别正在于此：那四种的棋子都实打实地参与杀
+ * （两炮都在将军 / 车真的封了口 / 中炮正是士不敢吃车的原因 / 将军子确实沉在底线），
+ * 所以它们能命名；空头炮不能。
+ */
+
+/** 双车错：另一车确实参与封口（攻击将的相邻格） */
+function matchShuangchecuo(ctx) {
+  for (var i = 0; i < ctx.checkers.length; i++) {
+    var from = ctx.checkers[i];
+    if (abs(ctx.board[from]) !== ROOK) continue;
+    var others = piecesOf(ctx.pos, ctx.atkSide, ROOK).filter(function (r) { return r !== from; });
+    var around = kingNeighbors(ctx.kingIdx);
+    for (var a = 0; a < others.length; a++) {
+      for (var b = 0; b < around.length; b++) {
+        if (rookAttacks(ctx.board, others[a], around[b])) {
+          return pattern('shuangchecuo', '一车将军，另一车封住将的退路', {
+            checker: from, king: ctx.kingIdx, pieces: [from, others[a]]
+          });
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 二鬼拍门：双兵都进了九宫，且分别占住 3 路与 5 路两条肋道
+ *
+ * 将军子可以是别的子力（定义即「锁住两条肋道，再借其他子力配合攻击」），
+ * 所以不要求将军子是兵。
+ */
+function matchErguipaimen(ctx) {
+  var pawns = piecesOf(ctx.pos, ctx.atkSide, PAWN).filter(function (p) {
+    return C.inPalace(C.fileOf(p), C.rankOf(p), ctx.defSide);
+  });
+  if (pawns.length < 2) return null;
+
+  var onFile3 = -1, onFile5 = -1;
+  for (var i = 0; i < pawns.length; i++) {
+    var f = C.fileOf(pawns[i]);
+    if (f === 3 && onFile3 < 0) onFile3 = pawns[i];
+    if (f === 5 && onFile5 < 0) onFile5 = pawns[i];
+  }
+  if (onFile3 < 0 || onFile5 < 0) return null;
+
+  return pattern('erguipaimen', '双兵分占两条肋道，锁死九宫', {
+    checker: firstChecker(ctx), king: ctx.kingIdx, pieces: [onFile3, onFile5]
+  });
+}
+
+/** 兜底：将的退路全被自家子占着 */
+function matchSelfBlocked(ctx) {
+  if (!selfBlocked(ctx)) return null;
+  return pattern('mensha', '将的退路被自家子堵死', {
+    checker: firstChecker(ctx), king: ctx.kingIdx, pieces: [firstChecker(ctx)]
+  });
 }
 
 // ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
+
+/**
+ * 匹配器链：**顺序即优先级，越具体的排越前**
+ *
+ * 前 5 条都带唯一性条件（马位格位、单炮、无车参与等），彼此不重叠；
+ * 中段是阵形型（铁门栓/海底捞月/天地炮/夹车炮/空头炮），它们比「双车错」
+ * 这类只靠「另一子参与封口」的松判据更具体，所以排在前面。
+ */
+var MATCHERS = [
+  matchDuimianxiao,
+  matchMahoupao,
+  matchKnight,
+  matchMengong,
+  matchChongpao,
+  matchTiemenshuan,
+  matchHaidilaoyue,
+  matchTiandipao,
+  matchJiachepao,
+  matchMensha,
+  matchShuangchecuo,
+  matchErguipaimen,
+  matchSelfBlocked
+];
 
 /**
  * 识别杀法
@@ -229,160 +574,32 @@ function selfBlocked(pos, defSide, kingIdx) {
  * @returns {?{key:string, name:string, why:string}} 认不出时返回 null
  */
 function classifyMate(pos, atkSide) {
+  if (!pos || !pos.board) return null;
   var defSide = 1 - atkSide;
   var kingIdx = pos.kingPos[defSide];
-  if (kingIdx < 0 || !pos.board) return null;
+  if (kingIdx < 0) return null;
 
-  var board = pos.board;
-  var checkers = findCheckers(pos, atkSide);
+  var ctx = {
+    pos: pos,
+    board: pos.board,
+    atkSide: atkSide,
+    defSide: defSide,
+    kingIdx: kingIdx,
+    checkers: findCheckers(pos, atkSide)
+  };
 
-  // 1) 将帅照面：没有任何子力将军，唯一的将军来源就是「帅/将」本身
-  if (!checkers.length) {
-    if (MG.kingsAreFacing(pos)) {
-      var rk = pos.kingPos[atkSide];
-      var bk = pos.kingPos[defSide];
-      return pattern('duimianxiao', '将帅照面，帅（将）本身封死退路',
-        { king: kingIdx, pieces: [rk, bk] });
-    }
-    return null;
-  }
-
-  // 2) 逐枚将军子匹配。顺序即优先级：越具体的形态越先判
-  for (var i = 0; i < checkers.length; i++) {
-    var from = checkers[i];
-    var type = abs(board[from]);
-    var hit = null;
-
-    if (type === CANNON) hit = cannonMate(pos, atkSide, kingIdx, from);
-    else if (type === KNIGHT) hit = knightMate(from, atkSide, defSide, kingIdx);
-    else if (type === ROOK) hit = rookMate(pos, atkSide, kingIdx, from);
-
+  // 没有任何子力将军时，唯一可能是「将帅照面」——也由匹配器链统一处理
+  for (var i = 0; i < MATCHERS.length; i++) {
+    var hit = MATCHERS[i](ctx);
     if (hit) return hit;
   }
-
-  // 3) 二鬼拍门：双兵分占两条肋道锁死九宫，将军子可以是别的子力
-  var wings = pawnsOnWings(pos, atkSide, defSide);
-  if (wings) {
-    return pattern('erguipaimen', '双兵分占两条肋道，锁死九宫',
-      { checker: checkers[0], king: kingIdx, pieces: wings });
-  }
-
-  // 4) 兜底：将的退路全被自家子占着
-  if (selfBlocked(pos, defSide, kingIdx)) {
-    return pattern('mensha', '将的退路被自家子堵死',
-      { checker: checkers[0], king: kingIdx, pieces: [checkers[0]] });
-  }
-
   return null;
-}
-
-/**
- * 炮系杀法：看炮架是谁
- *
- * 炮架是己方马 -> 马后炮；己方炮 -> 重炮。
- *
- * 炮架是敌子时，按「闷宫 / 闷杀」的定义细分（据百度百科「闷宫」词条）：
- *   闷宫 —— 炮架**一定是敌方的士**，且将紧贴炮架；对方因自家子阻碍动弹不得
- *   闷杀 —— 炮架是士以外的其他子力，或将已离开原位
- * 两者常合称「闷将杀」，但炮架是不是士这条界线很清楚。
- */
-function cannonMate(pos, atkSide, kingIdx, from) {
-  var line = between(from, kingIdx);
-  if (!line) return null;
-
-  var board = pos.board;
-  var screens = [];
-  for (var i = 0; i < line.length; i++) {
-    if (board[line[i]] !== C.EMPTY) screens.push(line[i]);
-  }
-  // 将军成立的必要条件：炮与将之间恰好一个子
-  if (screens.length !== 1) return null;
-
-  var scr = screens[0];
-  var scrPiece = board[scr];
-
-  if (C.sideOf(scrPiece) === atkSide) {
-    var t = abs(scrPiece);
-    if (t === KNIGHT) {
-      return pattern('mahoupao', '炮以己方马为架',
-        { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
-    }
-    if (t === CANNON) {
-      return pattern('chongpao', '两炮并线，以己方炮为架',
-        { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
-    }
-    return null;
-  }
-
-  // 炮架是敌子
-  if (abs(scrPiece) === ADVISOR && isAdjacent(scr, kingIdx)) {
-    return pattern('mengong', '炮以敌方士为架，将紧贴炮架被堵死',
-      { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
-  }
-  return pattern('mensha', '炮借敌子为架，将被自家子堵死',
-    { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
-}
-
-/** 马系杀法：由落点的马位术语决定 */
-function knightMate(from, atkSide, defSide, kingIdx) {
-  var term = horseTerm(C.fileOf(from), C.rankOf(from), atkSide, defSide);
-  var key = term ? HORSE_MATE_KEY[term] : null;
-  if (!key) return null;
-  return pattern(key, '马踏' + term + '位',
-    { checker: from, king: kingIdx, pieces: [from] });
-}
-
-/**
- * 车系杀法：另一车必须真的参与封口
- *
- * 只数「还有一车」会把单车杀误判成双车错，所以要求另一车确实攻击将的某个
- * 相邻格——它才是把退路封住的那一车。
- */
-function rookMate(pos, atkSide, kingIdx, from) {
-  var board = pos.board;
-  var others = piecesOf(pos, atkSide, ROOK).filter(function (r) { return r !== from; });
-  if (!others.length) return null;
-
-  var around = kingNeighbors(kingIdx);
-  for (var i = 0; i < others.length; i++) {
-    for (var j = 0; j < around.length; j++) {
-      if (rookAttacks(board, others[i], around[j])) {
-        return pattern('shuangchecuo', '一车将军，另一车封住将的退路',
-          { checker: from, king: kingIdx, pieces: [from, others[i]] });
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * 二鬼拍门
- *
- * 判据取最不含糊的形态——两只兵都进了九宫，且分别占住 3 路与 5 路两条肋道，
- * 把将的左右退路连同九宫前沿一起锁死。将军子可以是别的子力（定义即
- * 「锁住两条肋道，再借其他子力配合攻击」），所以不要求将军子是兵。
- *
- * @returns {?number[]} 两条肋道上的兵，不构成时返回 null
- */
-function pawnsOnWings(pos, atkSide, defSide) {
-  var pawns = piecesOf(pos, atkSide, PAWN).filter(function (p) {
-    return C.inPalace(C.fileOf(p), C.rankOf(p), defSide);
-  });
-  if (pawns.length < 2) return null;
-
-  var onFile3 = null;
-  var onFile5 = null;
-  for (var i = 0; i < pawns.length; i++) {
-    var f = C.fileOf(pawns[i]);
-    if (f === 3 && onFile3 === null) onFile3 = pawns[i];
-    if (f === 5 && onFile5 === null) onFile5 = pawns[i];
-  }
-  if (onFile3 === null || onFile5 === null) return null;
-  return [onFile3, onFile5];
 }
 
 module.exports = classifyMate;
 module.exports.classifyMate = classifyMate;
 module.exports.MATE_PATTERNS = MATE_PATTERNS;
+module.exports.MATCHERS = MATCHERS;
 module.exports.between = between;
 module.exports.horseTerm = horseTerm;
+module.exports.cannonScreen = cannonScreen;

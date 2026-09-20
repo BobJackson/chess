@@ -24,6 +24,27 @@ var VOICE = 'Tingting';
 var OUT = path.join(__dirname, '..', 'miniprogram', 'audio');
 var BITRATE = 32000;
 
+/**
+ * 朗读文本清单：key -> 实际朗读的文本
+ *
+ * 存在两个理由：
+ *  1) **增量生成**。afconvert 出来的 m4a 是非确定性的——同一段文本连跑两次，
+ *     字节就不一样（音频内容相同、解码后 PCM 完全一致，差的是容器里的元数据）。
+ *     不做跳过的话，每跑一次生成都会把全部文件标记成已修改，提交里全是二进制噪音。
+ *  2) 顺手记下每个文件到底念的是什么（有 speech 同音替代时，光看文件名看不出来）。
+ */
+var MANIFEST = path.join(OUT, 'mate-voice.json');
+
+var FORCE = process.argv.indexOf('--force') >= 0;
+
+function readManifest() {
+  try {
+    return JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
 function has(cmd) {
   try {
     execFileSync('which', [cmd], { stdio: 'pipe' });
@@ -51,19 +72,30 @@ function synth(text, outFile) {
   ], { stdio: 'pipe' });
 }
 
+var manifest = readManifest();
 var total = 0;
 var done = 0;
+var skipped = 0;
 
 Mate.MATE_PATTERNS.forEach(function (p) {
   var outFile = path.join(OUT, 'mate-' + p.key + '.m4a');
   // speech 是同音替代文本，用来锁死多音字读音（如 重炮 -> 虫炮）；显示仍是 name
   var text = p.speech || p.name;
+
+  // 文本没变、文件还在，就不重跑——见 MANIFEST 处的说明
+  if (!FORCE && manifest[p.key] === text && fs.existsSync(outFile)) {
+    skipped++;
+    console.log('  \x1b[90m跳过\x1b[0m  ' + p.name + '（朗读文本未变）');
+    return;
+  }
+
   try {
     synth(text, outFile);
   } catch (e) {
     console.error('  \x1b[31m失败\x1b[0m  ' + p.name + '：' + e.message);
     return;
   }
+  manifest[p.key] = text;
   var size = fs.statSync(outFile).size;
   total += size;
   done++;
@@ -72,7 +104,16 @@ Mate.MATE_PATTERNS.forEach(function (p) {
     path.basename(outFile) + '  (' + size + ' B)' + mark);
 });
 
+// 清单只保留当前清单里还有的 key，避免改名后留下孤儿条目
+var clean = {};
+Mate.MATE_PATTERNS.forEach(function (p) {
+  if (manifest[p.key] !== undefined) clean[p.key] = manifest[p.key];
+});
+fs.writeFileSync(MANIFEST, JSON.stringify(clean, null, 2) + '\n');
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
-console.log('\n共 ' + done + '/' + Mate.MATE_PATTERNS.length + ' 条，合计 ' +
-  (total / 1024).toFixed(1) + ' KB，输出目录 miniprogram/audio/');
+console.log('\n新生成 ' + done + ' 条、跳过 ' + skipped + ' 条，共 ' +
+  Mate.MATE_PATTERNS.length + ' 条；本次写入 ' + (total / 1024).toFixed(1) +
+  ' KB，输出目录 miniprogram/audio/');
+if (FORCE) console.log('（--force：全部重生成）');

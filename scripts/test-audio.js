@@ -169,6 +169,26 @@ console.log('\n[7] 杀法语音资产齐备');
     return f.indexOf('mate-') === 0 && /\.m4a$/.test(f);
   });
   assert('磁盘上的语音数量与清单一致', onDisk.length, Mate.MATE_PATTERNS.length);
+
+  // 朗读文本清单：增量生成靠它判断「文本没变就跳过」，
+  // 所以它必须和 MATE_PATTERNS 严格对齐，否则要么漏生成、要么白生成。
+  var manifest = null;
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(dir, 'mate-voice.json'), 'utf8'));
+  } catch (e) { manifest = null; }
+  truthy('朗读清单存在且可解析', manifest);
+
+  var wantKeys = Mate.MATE_PATTERNS.map(function (p) { return p.key; }).sort().join(',');
+  assert('清单覆盖全部杀法', manifest ? Object.keys(manifest).sort().join(',') : '', wantKeys);
+
+  var mismatch = null;
+  Mate.MATE_PATTERNS.forEach(function (p) {
+    var want = p.speech || p.name;
+    if (manifest && manifest[p.key] !== want) {
+      mismatch = p.key + ' 清单是「' + manifest[p.key] + '」、应为「' + want + '」';
+    }
+  });
+  assert('清单里的朗读文本与代码一致', mismatch, null);
 })();
 
 console.log('\n----------------------------------------');
