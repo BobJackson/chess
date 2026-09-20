@@ -52,8 +52,23 @@ var MATE_PATTERNS = [
 var BY_KEY = {};
 MATE_PATTERNS.forEach(function (p) { BY_KEY[p.key] = p.name; });
 
-function pattern(key, why) {
-  return { key: key, name: BY_KEY[key], why: why };
+/**
+ * 组装识别结果
+ *
+ * 除名字外还带回**演出需要的几何**，让绝杀动画可以数据驱动地画出来：
+ *   checker 将军子索引（将帅照面时为 null）
+ *   screen  炮架索引（非炮系为 null）
+ *   king    被将方的将/帅索引
+ *   pieces  构成这个杀法的棋子索引（用于高亮"是哪几枚杀死的"）
+ */
+function pattern(key, why, geo) {
+  var out = { key: key, name: BY_KEY[key], why: why, checker: null, screen: null, king: null, pieces: [] };
+  if (geo) {
+    for (var k in geo) {
+      if (Object.prototype.hasOwnProperty.call(geo, k)) out[k] = geo[k];
+    }
+  }
+  return out;
 }
 
 function abs(v) { return v > 0 ? v : -v; }
@@ -224,7 +239,10 @@ function classifyMate(pos, atkSide) {
   // 1) 将帅照面：没有任何子力将军，唯一的将军来源就是「帅/将」本身
   if (!checkers.length) {
     if (MG.kingsAreFacing(pos)) {
-      return pattern('duimianxiao', '将帅照面，帅（将）本身封死退路');
+      var rk = pos.kingPos[atkSide];
+      var bk = pos.kingPos[defSide];
+      return pattern('duimianxiao', '将帅照面，帅（将）本身封死退路',
+        { king: kingIdx, pieces: [rk, bk] });
     }
     return null;
   }
@@ -236,20 +254,23 @@ function classifyMate(pos, atkSide) {
     var hit = null;
 
     if (type === CANNON) hit = cannonMate(pos, atkSide, kingIdx, from);
-    else if (type === KNIGHT) hit = knightMate(from, atkSide, defSide);
+    else if (type === KNIGHT) hit = knightMate(from, atkSide, defSide, kingIdx);
     else if (type === ROOK) hit = rookMate(pos, atkSide, kingIdx, from);
 
     if (hit) return hit;
   }
 
   // 3) 二鬼拍门：双兵分占两条肋道锁死九宫，将军子可以是别的子力
-  if (twoPawnsOnWings(pos, atkSide, defSide)) {
-    return pattern('erguipaimen', '双兵分占两条肋道，锁死九宫');
+  var wings = pawnsOnWings(pos, atkSide, defSide);
+  if (wings) {
+    return pattern('erguipaimen', '双兵分占两条肋道，锁死九宫',
+      { checker: checkers[0], king: kingIdx, pieces: wings });
   }
 
   // 4) 兜底：将的退路全被自家子占着
   if (selfBlocked(pos, defSide, kingIdx)) {
-    return pattern('mensha', '将的退路被自家子堵死');
+    return pattern('mensha', '将的退路被自家子堵死',
+      { checker: checkers[0], king: kingIdx, pieces: [checkers[0]] });
   }
 
   return null;
@@ -282,24 +303,33 @@ function cannonMate(pos, atkSide, kingIdx, from) {
 
   if (C.sideOf(scrPiece) === atkSide) {
     var t = abs(scrPiece);
-    if (t === KNIGHT) return pattern('mahoupao', '炮以己方马为架');
-    if (t === CANNON) return pattern('chongpao', '两炮并线，以己方炮为架');
+    if (t === KNIGHT) {
+      return pattern('mahoupao', '炮以己方马为架',
+        { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
+    }
+    if (t === CANNON) {
+      return pattern('chongpao', '两炮并线，以己方炮为架',
+        { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
+    }
     return null;
   }
 
   // 炮架是敌子
   if (abs(scrPiece) === ADVISOR && isAdjacent(scr, kingIdx)) {
-    return pattern('mengong', '炮以敌方士为架，将紧贴炮架被堵死');
+    return pattern('mengong', '炮以敌方士为架，将紧贴炮架被堵死',
+      { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
   }
-  return pattern('mensha', '炮借敌子为架，将被自家子堵死');
+  return pattern('mensha', '炮借敌子为架，将被自家子堵死',
+    { checker: from, screen: scr, king: kingIdx, pieces: [from, scr] });
 }
 
 /** 马系杀法：由落点的马位术语决定 */
-function knightMate(from, atkSide, defSide) {
+function knightMate(from, atkSide, defSide, kingIdx) {
   var term = horseTerm(C.fileOf(from), C.rankOf(from), atkSide, defSide);
   var key = term ? HORSE_MATE_KEY[term] : null;
   if (!key) return null;
-  return pattern(key, '马踏' + term + '位');
+  return pattern(key, '马踏' + term + '位',
+    { checker: from, king: kingIdx, pieces: [from] });
 }
 
 /**
@@ -317,7 +347,8 @@ function rookMate(pos, atkSide, kingIdx, from) {
   for (var i = 0; i < others.length; i++) {
     for (var j = 0; j < around.length; j++) {
       if (rookAttacks(board, others[i], around[j])) {
-        return pattern('shuangchecuo', '一车将军，另一车封住将的退路');
+        return pattern('shuangchecuo', '一车将军，另一车封住将的退路',
+          { checker: from, king: kingIdx, pieces: [from, others[i]] });
       }
     }
   }
@@ -330,21 +361,24 @@ function rookMate(pos, atkSide, kingIdx, from) {
  * 判据取最不含糊的形态——两只兵都进了九宫，且分别占住 3 路与 5 路两条肋道，
  * 把将的左右退路连同九宫前沿一起锁死。将军子可以是别的子力（定义即
  * 「锁住两条肋道，再借其他子力配合攻击」），所以不要求将军子是兵。
+ *
+ * @returns {?number[]} 两条肋道上的兵，不构成时返回 null
  */
-function twoPawnsOnWings(pos, atkSide, defSide) {
+function pawnsOnWings(pos, atkSide, defSide) {
   var pawns = piecesOf(pos, atkSide, PAWN).filter(function (p) {
     return C.inPalace(C.fileOf(p), C.rankOf(p), defSide);
   });
-  if (pawns.length < 2) return false;
+  if (pawns.length < 2) return null;
 
-  var onFile3 = false;
-  var onFile5 = false;
+  var onFile3 = null;
+  var onFile5 = null;
   for (var i = 0; i < pawns.length; i++) {
     var f = C.fileOf(pawns[i]);
-    if (f === 3) onFile3 = true;
-    if (f === 5) onFile5 = true;
+    if (f === 3 && onFile3 === null) onFile3 = pawns[i];
+    if (f === 5 && onFile5 === null) onFile5 = pawns[i];
   }
-  return onFile3 && onFile5;
+  if (onFile3 === null || onFile5 === null) return null;
+  return [onFile3, onFile5];
 }
 
 module.exports = classifyMate;

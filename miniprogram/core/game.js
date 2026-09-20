@@ -223,6 +223,7 @@ Game.prototype.finish = function (winner, reason) {
     reason: reason,
     mate: mate ? mate.name : null,
     mateKey: mate ? mate.key : null,
+    mateInfo: mate,
     text: (mate ? mate.name + '，' : '') + reason +
       (winner === DRAW ? '，和棋' : '，' + sideName(winner) + '胜')
   };
@@ -252,6 +253,8 @@ Game.prototype._detectResult = function (entry) {
       // 杀法名与稳定的 ASCII key（供语音等外部资源引用），认不出时均为 null
       mate: mate ? mate.name : null,
       mateKey: mate ? mate.key : null,
+      // 整份识别结果（含 checker/screen/king/pieces 等几何），供绝杀演出按杀法分叉
+      mateInfo: mate,
       text: (mate ? mate.name + '，' : '') +
         (mated ? '绝杀无解' : '无子可动') + '，' + sideName(mover) + '胜'
     };

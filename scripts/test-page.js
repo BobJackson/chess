@@ -422,7 +422,7 @@ console.log('\n[7] 菜单被动分享：等待中携带房间号');
   app.session = null;
 })();
 
-console.log('\n[8] 绝杀：弹窗带杀法名 + 朗读出来');
+console.log('\n[8] 绝杀演出：替代系统弹窗 + 朗读杀法名');
 (function () {
   var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
   var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
@@ -443,31 +443,71 @@ console.log('\n[8] 绝杀：弹窗带杀法名 + 朗读出来');
   truthy('走出将死一手', b.game.result);
   assert('结果带杀法名', b.game.result.mate, '马后炮');
   assert('结果带杀法 key', b.game.result.mateKey, 'mahoupao');
-  assert('落子动画期间先不弹窗', shownModals.length, 0);
+  assert('结果带演出几何（炮架）', b.game.result.mateInfo.screen, C.idxOf(5, 0));
+  assert('落子动画期间还没起演出', b.endgame.isActive(), false);
 
   pumpMs(600);
-  assert('动画播完后弹窗一次', shownModals.length, 1);
-  assert('弹窗标题带杀法名', shownModals[0].title, '绝杀 · 马后炮');
-  assert('弹窗正文带杀法名', shownModals[0].content, '马后炮，绝杀无解，红方胜');
+  assert('动画播完后起演出', b.endgame.isActive(), true);
+  assert('不再弹系统窗', shownModals.length, 0);
+  assert('落款标题是杀法名', b.endgame.title(), '马后炮');
+  assert('落款副标题是胜负', b.endgame.subtitle(), '红方胜');
   truthy('朗读了对应杀法', audioSrcs.indexOf('/audio/mate-mahoupao.m4a') >= 0);
 
-  // 非杀法的终局不朗读、标题也不套杀法名
-  b.resultShown = false;
-  shownModals.length = 0;
-  audioSrcs.length = 0;
+  // 演出期间棋盘与工具栏都不响应；按钮未浮现时点按只算跳过
+  pumpMs(300);
+  assert('演出未播完时按钮不可点', b.endgame.hitButtonAt(app.w / 2, app.h / 2), null);
+  assert('演出期间棋盘不吃触摸', b.controller.selected, -1);
+
+  tap(app.w / 2, 40);
+  assert('点空白处跳过演出', b.endgame.isDone(), true);
+
+  // 落款按钮：再来一局
+  var again = null;
+  b.endgame.buttons.forEach(function (x) { if (x.id === 'again') again = x; });
+  truthy('有「再来一局」按钮', again);
+  tap(again.x + again.w / 2, again.y + again.h / 2);
+  assert('点再来一局后重开', b.game.plyCount(), 0);
+  assert('重开后演出收起', b.endgame.isActive(), false);
+
+  // 非杀法终局：演出照起，但不朗读、标题用终局原因
   b.game = new Game();
   b.controller.setGame(b.game);
+  b.resultShown = false;
+  audioSrcs.length = 0;
   b.game.finish(C.BLACK, '认输');
   b.showResult();
-  assert('认输弹窗标题不带杀法名', shownModals[0].title, '对局结束');
+  pumpMs(16);
+  assert('认输也起演出', b.endgame.isActive(), true);
+  assert('认输标题用终局原因', b.endgame.title(), '认输');
+  assert('认输副标题', b.endgame.subtitle(), '黑方胜');
   // 胜负音效照常播，但不应有杀法语音
   var mateVoices = audioSrcs.filter(function (s) { return s.indexOf('/audio/mate-') === 0; });
   assert('认输不朗读杀法', mateVoices.length, 0);
   truthy('认输仍播胜负音效', audioSrcs.length > 0);
 
-  var back = centerOf(b.toolbar[4]);
-  tap(back.x, back.y);
+  // 落款按钮：回菜单
+  b.endgame.skip();
+  pumpMs(16);
+  var menuBtn = null;
+  b.endgame.buttons.forEach(function (x) { if (x.id === 'menu') menuBtn = x; });
+  truthy('有「回菜单」按钮', menuBtn);
+  tap(menuBtn.x + menuBtn.w / 2, menuBtn.y + menuBtn.h / 2);
   assert('返回菜单', manager.current.name, 'menu');
+})();
+
+console.log('\n[9] 联机终局只给「回菜单」');
+(function () {
+  // 联机不能重开，演出就不该给「再来一局」这个按钮
+  var Endgame = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'endgame.js'));
+  var eg = new Endgame();
+  eg.start({ winner: 0, reason: '将死' }, { online: true });
+  var ids = eg.layoutButtons(375, 700).map(function (x) { return x.id; });
+  assert('联机只有一个按钮', ids.join(','), 'menu');
+
+  var eg2 = new Endgame();
+  eg2.start({ winner: 0, reason: '将死' }, { online: false });
+  var ids2 = eg2.layoutButtons(375, 700).map(function (x) { return x.id; });
+  assert('人机/本地有两个按钮', ids2.join(','), 'again,menu');
 })();
 
 console.log('\n----------------------------------------');

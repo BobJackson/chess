@@ -10,14 +10,20 @@ var AI = require('../core/ai.js');
 var Layout = require('../ui/layout.js');
 var Renderer = require('../ui/renderer.js');
 var Controller = require('../ui/controller.js');
+var Endgame = require('../ui/endgame.js');
 var C = require('../core/constants.js');
 var W = require('../ui/widgets.js');
 
 /** layout.height / layout.width 的固定比例（由 PADDING_RATIO 决定） */
 var BOARD_ASPECT = 10.24 / 9.24;
 
-/** 绝杀后延迟多久朗读杀法名：先让胜负音效落一下，两条声音不叠在一起 */
-var MATE_VOICE_DELAY = 550;
+/**
+ * 绝杀后延迟多久朗读杀法名
+ *
+ * 演出时间线里落款在 1050ms 开始浮现，所以让语音稍晚一点起步，
+ * 念到名字时字正好放大到位——声音和落款同拍，而不是各说各的。
+ */
+var MATE_VOICE_DELAY = 1000;
 
 // ---------------------------------------------------------------------------
 // 屏幕级装饰（美化棋盘上下的留白）
@@ -123,8 +129,10 @@ function createBoardScene(app) {
     afterAnim: null,
     /** 绝杀语音的延迟定时器 */
     mateVoiceTimer: null,
-    /** 终局只播一次（音效 + 语音 + 弹窗） */
-    resultShown: false
+    /** 终局只播一次（音效 + 语音 + 演出） */
+    resultShown: false,
+    /** 绝杀演出（替代 wx.showModal） */
+    endgame: new Endgame()
   };
 
   // -------------------------------------------------------------------------
@@ -133,6 +141,10 @@ function createBoardScene(app) {
     scene.mode = params.mode === 'local' ? 'local' : (params.mode === 'online' ? 'online' : 'ai');
     scene.session = scene.mode === 'online' ? app.session : null;
     if (scene.mode === 'online' && !scene.session) { app.go('menu'); return; }
+
+    scene.endgame.reset();
+    scene.resultShown = false;
+    scene.mateVoiceTimer = null;
 
     scene.difficulty = app.difficulty;
     scene.humanSide = scene.mode === 'online' ? scene.session.mySide : C.RED;
@@ -324,7 +336,7 @@ function createBoardScene(app) {
     var win = scene.mode === 'local' ? true : (result.winner === scene.humanSide);
     app.audio.play(win ? 'win' : 'lose');
 
-    // 绝杀时把杀法名念出来——不只是弹窗显示。等胜负音效落一下再念，两条声音不打架
+    // 绝杀时把杀法名念出来——不只是显示。延迟到落款浮现时再念，声画同拍
     if (result.mateKey) {
       scene.clearMateVoice();
       scene.mateVoiceTimer = setTimeout(function () {
@@ -333,12 +345,23 @@ function createBoardScene(app) {
       }, MATE_VOICE_DELAY);
     }
 
-    wx.showModal({
-      title: result.mate ? '绝杀 · ' + result.mate : '对局结束',
-      content: result.text,
-      showCancel: false,
-      confirmText: '知道了'
+    // 用自绘的绝杀演出替代 wx.showModal：纯文字弹窗太单薄，
+    // 演出能把「这一招怎么杀的」按杀法分叉演一遍，再落款给名字与结果
+    scene.endgame.start(result, {
+      board: scene.game.pos.board,
+      layout: scene.layout,
+      win: win,
+      online: scene.mode === 'online'
     });
+    scene.dirty = true;
+  };
+
+  /** 演出的落款按钮：再来一局 / 回菜单 */
+  scene.endgameAction = function (id) {
+    scene.endgame.reset();
+    scene.dirty = true;
+    if (id === 'again') scene.toolAction('restart');
+    else if (id === 'menu') scene.toolAction('back');
   };
 
   /** 离开对局时撤掉还没播出的杀法语音，避免在菜单里突然冒出一句 */
@@ -357,6 +380,25 @@ function createBoardScene(app) {
   };
 
   scene.onTouch = function (type, x, y) {
+    // 绝杀演出期间独占输入：点按跳过，落款浮现后按钮才可点
+    if (scene.endgame.isActive()) {
+      if (type === 'start') {
+        scene.endgame.pressed = scene.endgame.hitButtonAt(x, y);
+        scene.dirty = true;
+      } else if (type === 'cancel') {
+        scene.endgame.pressed = null;
+        scene.dirty = true;
+      } else if (type === 'end') {
+        var hit = scene.endgame.hitButtonAt(x, y);
+        var was = scene.endgame.pressed;
+        scene.endgame.pressed = null;
+        scene.dirty = true;
+        if (hit && hit === was) scene.endgameAction(hit);
+        else if (!hit) scene.endgame.skip();   // 点空白处 = 跳过演出
+      }
+      return;
+    }
+
     // 工具栏优先
     if (type === 'start') {
       scene.uiBtn = null;
@@ -410,6 +452,7 @@ function createBoardScene(app) {
       scene.afterAnim = null;
       scene.resultShown = false;
       scene.clearMateVoice();
+      scene.endgame.reset();
       scene.game = new Game();
       scene.controller.setGame(scene.game);
       scene.dirty = true; scene.refreshStatus();
@@ -427,19 +470,25 @@ function createBoardScene(app) {
   scene.onExit = function () {
     // 离开对局场景时若仍在联机，通知对手（菜单返回已 leave，这里兜底）
     if (scene.mode === 'online' && scene.session && scene.session.state === 'playing') scene.leave();
-    // 撤掉还没播出的杀法语音，别在菜单里突然冒出一句
+    // 撤掉还没播出的杀法语音，别在菜单里突然冒出一句；演出一并清掉
     scene.clearMateVoice();
+    scene.endgame.reset();
   };
 
   // -------------------------------------------------------------------------
   // 渲染
 
   scene.shouldRender = function (dt) {
-    // 拖拽中、走子动画中、落子余晖未散、被将军时都需要按帧重绘
+    // 拖拽中、走子动画中、落子余晖未散、绝杀演出未播完、被将军时都需要按帧重绘
     var anim = !!scene.controller.drag || scene.controller.isAnimating() ||
       scene.controller.isLanding() ||
+      (scene.endgame.isActive() && !scene.endgame.isDone()) ||
       (!scene.game.result && scene.game.isChecked());
-    if (anim) { scene.controller.tick(dt); scene.dirty = true; }
+    if (anim) {
+      scene.controller.tick(dt);
+      scene.endgame.tick(dt);
+      scene.dirty = true;
+    }
     return scene.dirty;
   };
 
@@ -468,6 +517,11 @@ function createBoardScene(app) {
 
     // 工具栏
     for (var i = 0; i < scene.toolbar.length; i++) W.drawButton(ctx, scene.toolbar[i], scene.uiBtn === scene.toolbar[i].id);
+
+    // 绝杀演出盖在工具栏之上：终局时整屏进入结算，不再有工具栏的干扰
+    if (scene.endgame.isActive()) {
+      scene.endgame.draw(ctx, w, h, scene.boardX, scene.boardTop);
+    }
   };
 
   return scene;
