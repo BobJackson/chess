@@ -40,74 +40,7 @@ function truthy(name, actual) { assert(name, !!actual, true); }
 // 用例：fen 局面里由黑方走棋且已被将死
 // ---------------------------------------------------------------------------
 
-var CASES = [
-  {
-    name: '马后炮',
-    key: 'mahoupao',
-    fen: '3akN2C/4a4/9/9/9/5R3/9/9/9/5K3 b - - 0 1',
-    why: '炮在 (8,0) 沿底线将军，炮架是己方马 (5,0)'
-  },
-  {
-    name: '重炮',
-    key: 'chongpao',
-    fen: '3nkn3/9/4C4/9/4C4/9/9/9/9/4K4 b - - 0 1',
-    why: '两炮并线，后炮以前炮为架将军；将进中格仍被同一炮打'
-  },
-  {
-    name: '闷宫',
-    key: 'mengong',
-    fen: 'C2akn3/4n4/9/9/9/9/9/9/9/4K4 b - - 0 1',
-    why: '炮以敌方士为架，将紧贴炮架、被自家马堵死'
-  },
-  {
-    name: '双车错',
-    key: 'shuangchecuo',
-    fen: 'R3k4/R8/9/9/9/9/9/9/9/3K5 b - - 0 1',
-    why: '一车底线将军，另一车封住将的侧向退路'
-  },
-  {
-    name: '卧槽马',
-    key: 'wocaoma',
-    fen: '3aka3/2N5R/9/9/9/9/9/9/9/5K3 b - - 0 1',
-    why: '马踏卧槽位 (2,1)'
-  },
-  {
-    name: '挂角马',
-    key: 'guajiaoma',
-    fen: '3aka3/R8/3N5/9/9/9/9/9/9/5K3 b - - 0 1',
-    why: '马踏挂角位 (3,2)'
-  },
-  {
-    name: '钓鱼马',
-    key: 'diaoyuma',
-    fen: '4n4/4k4/4n1N2/9/9/3R1R3/9/9/9/4K4 b - - 0 1',
-    why: '马踏钓鱼位 (6,2)，将被迫退到九宫中心'
-  },
-  {
-    name: '侧面虎',
-    key: 'cemianhu',
-    fen: '9/R8/3aka3/2N6/9/9/9/9/9/5K3 b - - 0 1',
-    why: '马踏侧面虎位 (2,3)，将顶在九宫前沿'
-  },
-  {
-    name: '对面笑',
-    key: 'duimianxiao',
-    fen: '2N1k4/9/9/3R1R3/9/9/9/9/9/4K4 b - - 0 1',
-    why: '将帅照面，帅本身封死退路，无子力将军'
-  },
-  {
-    name: '二鬼拍门',
-    key: 'erguipaimen',
-    fen: '4k4/3P1P3/9/9/9/4R4/9/9/9/4K4 b - - 0 1',
-    why: '双兵分占 3/5 两条肋道，车配合将军'
-  },
-  {
-    name: '闷杀',
-    key: 'mensha',
-    fen: '2Rkr4/N2n5/9/9/9/9/9/9/9/3K5 b - - 0 1',
-    why: '将被自家车马堵死，车贴脸将军'
-  }
-];
+var CASES = require('./fixtures/mate-cases.js');
 
 console.log('\n[1] 每种杀法各验一局');
 CASES.forEach(function (c) {
