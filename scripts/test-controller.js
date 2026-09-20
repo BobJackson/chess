@@ -677,6 +677,56 @@ console.log('\n[15] 落子余晖：落定后把视线钉在刚落的那枚子上
   assert('setGame 清空余晖', g.ctrl.land, 0);
 })();
 
+console.log('\n[16] 被威胁的棋子：当前走棋方的子中，对方能吃掉的');
+(function () {
+  // 黑方走棋。黑马 (0,5)、黑炮 (8,5) 都落在红车 (0,9)/(8,9) 的射程里
+  var FEN = '3k5/9/9/9/9/n7c/9/9/9/R3K3R b - - 0 1';
+  var s = mkController({ fen: FEN });
+  assert('标出两枚被威胁的子', s.ctrl.threats.length, 2);
+  assert('含黑马', s.ctrl.threats.indexOf(C.idxOf(0, 5)) >= 0, true);
+  assert('含黑炮', s.ctrl.threats.indexOf(C.idxOf(8, 5)) >= 0, true);
+  assert('renderState 透传威胁列表', s.ctrl.renderState().threats.length, 2);
+
+  // 走子后轮到对方，威胁列表要跟着换成「标对方的子」
+  // 黑马跳到 (1,7) 反咬红车 (0,9)
+  s.ctrl.requestMove(C.idxOf(0, 5), C.idxOf(1, 7));
+  s.ctrl.finishAnim();
+  assert('走子后重算：轮到红方', s.game.pos.side, C.RED);
+  assert('  标出红方被威胁的子', s.ctrl.threats.length, 1);
+  assert('  正是那辆红车', s.ctrl.threats[0], C.idxOf(0, 9));
+
+  // reset（悔棋 / 换局走的就是它）也要重算
+  var s2 = mkController({ fen: FEN });
+  assert('换局后标出两枚', s2.ctrl.threats.length, 2);
+  s2.ctrl.reset();
+  assert('reset 后仍标出两枚（局面没变）', s2.ctrl.threats.length, 2);
+
+  // 开局就标出 2 枚：黑炮 (1,2) 隔着红炮 (1,7) 能打到红马 (1,9)，另一侧同理。
+  // 这不是误报——「能被吃就算」这条判据的应有之义，长射也算。
+  var open = mkController();
+  assert('开局标出两枚（黑炮隔红炮盯着红马）', open.ctrl.threats.length, 2);
+  assert('  含红马 (1,9)', open.ctrl.threats.indexOf(C.idxOf(1, 9)) >= 0, true);
+  assert('  含红马 (7,9)', open.ctrl.threats.indexOf(C.idxOf(7, 9)) >= 0, true);
+
+  // 终局之后不再标
+  var over = mkController({ fen: FEN });
+  over.game.finish(C.RED, '认输');
+  over.ctrl.refreshThreats();
+  assert('终局后不标威胁', over.ctrl.threats.length, 0);
+
+  // 判据是「有合法吃子能落到它身上」，**不做得失过滤**：
+  // 下面这局黑马 (0,5) 有黑车 (0,0) 保着，红炮吃它是等价交换，照样标出来
+  var defended = mkController({ fen: 'r3k4/9/9/9/9/n8/9/P8/9/C4K3 b - - 0 1' });
+  assert('有根、等价交换也照样标（不替玩家判断值不值）',
+    defended.ctrl.threats.length, 1);
+  assert('  正是那匹马', defended.ctrl.threats[0], C.idxOf(0, 5));
+
+  // 只标「能被吃到的子」，不标「能走到的空格」
+  s.ctrl.threats.forEach(function (idx) {
+    assert('  威胁项都是棋子（非空格）', s.game.pos.board[idx] !== C.EMPTY, true);
+  });
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

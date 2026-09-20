@@ -18,6 +18,7 @@
  */
 
 var C = require('../core/constants.js');
+var MG = require('../core/movegen.js');
 
 /** 拖动超过该比例格距才算拖拽，否则视为点击 */
 var DRAG_RATIO = 0.35;
@@ -60,6 +61,11 @@ function Controller(layout, game, options) {
   this.anim = null;
   /** 光晕起势强度 1~0：棋子落定时置 1 后按帧回落，让刚落的那枚子被看见 */
   this.land = 0;
+  /** 被威胁的棋子索引（当前走棋方的子中，对方能吃掉的），只在局面变化时重算 */
+  this.threats = [];
+
+  // 构造时就先算一次，免得在 reset 之前 renderState 拿到的是空列表
+  this.refreshThreats();
 }
 
 /** 是否允许本地操作（对局未结束、动画已落定且外部许可） */
@@ -86,7 +92,46 @@ Controller.prototype.reset = function () {
   this.pulse = 0;
   this.anim = null;
   this.land = 0;
+  this.refreshThreats();
   return this;
+};
+
+/**
+ * 重算「被威胁的棋子」：当前走棋方（轮到的那一方）的子中，对方能吃掉的
+ *
+ * 落子后轮到对方，所以标出来的正是「对方现在能吃我哪些子」——
+ * 对刚走完这一手的人来说是「我这一手威胁到了哪几枚」，对轮到的一方是
+ * 「我有哪几枚正被盯着」，两边看同一份信息。
+ *
+ * 判据就是「有合法吃子能落到它身上」，**不做子力得失过滤**：等价兑子、
+ * 乃至亏子换（如开局炮隔炮打马）都会标出来——宁可多标，不替玩家判断值不值。
+ *
+ * 只在局面变化时算一次（走子 / 悔棋 / 重开 / 联机重同步），
+ * 不放进每帧的渲染路径：它要把对方的合法走法整批生成一遍，逐帧算太贵。
+ *
+ * @returns {number[]} 被威胁棋子的索引
+ */
+Controller.prototype.refreshThreats = function () {
+  var game = this.game;
+  var out = [];
+  this.threats = out;
+  if (!game || game.result || !game.pos) return out;
+
+  var pos = game.pos;
+  var board = pos.board;
+  // 对方 = 刚走完棋的那一方（当前走棋方正是它的对手）
+  var foe = pos.side === C.RED ? C.BLACK : C.RED;
+
+  var moves = MG.genLegalMoves(pos, foe);
+  var seen = {};
+  for (var i = 0; i < moves.length; i++) {
+    var to = MG.moveTo(moves[i]);
+    if (board[to] === C.EMPTY) continue;   // 只关心能吃到的子，不管能走到的空格
+    if (seen[to]) continue;
+    seen[to] = 1;
+    out.push(to);
+  }
+  return out;
 };
 
 Controller.prototype.clearSelection = function () {
@@ -115,6 +160,8 @@ Controller.prototype.requestMove = function (from, to) {
   this.clearSelection();
   this.hint = null;
   this.drag = null;
+  // 局面变了，重算被威胁的棋子（走完这手轮到对方，标出的就是对方能吃我哪些子）
+  this.refreshThreats();
   // 先起动画再回调：回调里可能要判断「动画是否在播」来决定后续流程
   this.playMoveAnim(res.entry);
   if (res.entry.captured !== C.EMPTY && this.options.onCapture) {
@@ -352,7 +399,9 @@ Controller.prototype.renderState = function () {
       captured: anim.captured, t: anim.t
     } : null,
     // 落子余晖进度，配合 lastMove.to 高亮刚落定的那枚棋子
-    land: this.land
+    land: this.land,
+    // 被威胁的棋子（当前走棋方的子中对方能吃掉的），与「上一步」同形状、换颜色
+    threats: this.threats
   };
 };
 

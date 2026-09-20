@@ -31,7 +31,11 @@ var THEME = {
   capture: 'rgba(206,64,58,0.92)',
   lastMove: 'rgba(233,168,52,0.95)',
   check: 'rgba(206,64,58,0.95)',
-  hint: 'rgba(30,136,229,0.92)'
+  hint: 'rgba(30,136,229,0.92)',
+  // 被威胁的棋子：与「上一步」用同一套光晕形状、只换颜色。
+  // 刻意取偏冷的深绛红，与琥珀拉开距离——两件事必须一眼分得开。
+  // 同一局面被威胁的子可能有好几枚，**统一用这一个颜色**，不再按子分色。
+  threat: 'rgba(198,32,48,0.95)'
 };
 
 /**
@@ -380,6 +384,24 @@ function drawPieceGlow(ctx, L, idx, color, boost) {
 }
 
 /**
+ * 被威胁的棋子：统一套一圈光晕，形状与「上一步」完全一致，只换颜色
+ *
+ * 走「同一套形状 + 换色」而不是另做一套造型，是因为这两件事必须一眼分得开：
+ * 一个说「刚动的是这枚」，一个说「这几枚正被盯着」。
+ *
+ * @param {number[]} threats 棋子索引数组；多枚共用同一个主题色，不按子分色
+ */
+function drawThreats(ctx, L, board, threats) {
+  if (!threats || !threats.length || !board) return;
+  for (var i = 0; i < threats.length; i++) {
+    var idx = threats[i];
+    if (typeof idx !== 'number' || idx < 0 || idx >= C.BOARD_SIZE) continue;
+    if (board[idx] === C.EMPTY) continue;
+    drawPieceGlow(ctx, L, idx, THEME.threat, 0);
+  }
+}
+
+/**
  * 画一组着法标记（上一步 / 提示的起点与终点）
  *
  * 空格用四角小角标即可；但格子有棋子时角标会被整块盖住（角标 half 远小于棋子
@@ -494,6 +516,8 @@ function draw(ctx, L, state) {
   // 上一步的棋子常亮发光；落子瞬间由 land 给一下更亮的起势，再回落到常亮
   drawMoveMarks(ctx, L, state.board, state.lastMove, THEME.lastMove, 0.44, state.land);
   drawMoveMarks(ctx, L, state.board, state.hint, THEME.hint, 0.34, 0);
+  // 被威胁的棋子：同一套光晕形状、只换颜色，多枚统一一个色
+  drawThreats(ctx, L, state.board, state.threats);
 
   drawPieces(ctx, L, state.board, state.moving, state.anim);
 
@@ -525,6 +549,7 @@ module.exports = {
   easeInOutCubic: easeInOutCubic,
   drawCornerMark: drawCornerMark,
   drawMoveMarks: drawMoveMarks,
+  drawThreats: drawThreats,
   drawPieceGlow: drawPieceGlow,
   withAlpha: withAlpha,
   drawRing: drawRing,

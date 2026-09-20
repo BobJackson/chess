@@ -764,6 +764,58 @@ console.log('\n[16] 上一步棋子标记：持续发光，一眼看出刚动的
   R.drawMoveMarks(none, L, board, null, '#000', 0.44);
   assert('无着法不画角标', none.calls.moveTo.length, 0);
   assert('无着法不画光晕', none.calls.gradients, 0);
+
+  // 16.10 被威胁的棋子：与「上一步」同一套光晕形状，只换颜色
+  var THREAT_RGB = '198,32,48';
+  var threats = [C.idxOf(0, 0), C.idxOf(8, 0), C.idxOf(1, 2)];
+
+  function threatGlows(ctx) {
+    return ctx.calls.gradientsSpec.filter(function (g) {
+      return g.stops.length && String(g.stops[0][1]).indexOf(THREAT_RGB) >= 0;
+    });
+  }
+
+  var tctx = createStubContext();
+  R.draw(tctx, L, { board: board, threats: threats });
+  assert('三枚被威胁的棋子各一圈光晕', threatGlows(tctx).length, 3);
+
+  // 三圈必须出自同一个基色（只是透明度不同）——「多枚颜色统一」
+  var baseColors = {};
+  threatGlows(tctx).forEach(function (g) {
+    g.stops.forEach(function (s) {
+      baseColors[String(s[1]).replace(/[\d.]+\)$/, ')')] = 1;
+    });
+  });
+  assert('多枚被威胁的子共用同一个基色', Object.keys(baseColors).length, 1);
+
+  // 与「上一步」的光晕形状一致：同样的三段渐变（内浓外透）
+  var one = threatGlows(tctx)[0];
+  assert('光晕三段渐变', one.stops.length, 3);
+  assert('最外圈透明', one.stops[2][1].indexOf(',0)') > 0, true);
+
+  // 与「上一步」的颜色必须分得开，否则玩家分不清「刚走的」和「要被吃的」
+  assert('威胁色与上一步色不同', R.THEME.threat === R.THEME.lastMove, false);
+
+  // 空列表 / null / 越界 / 空格：不画也不报错
+  var e1 = createStubContext();
+  R.drawThreats(e1, L, board, []);
+  assert('空列表不绘制', e1.calls.gradients, 0);
+  var e2 = createStubContext();
+  R.drawThreats(e2, L, board, null);
+  assert('null 不绘制且不报错', e2.calls.gradients, 0);
+  var e3 = createStubContext();
+  R.drawThreats(e3, L, board, [C.idxOf(4, 4), -1, 999]);
+  assert('空格与越界索引被跳过', e3.calls.gradients, 0);
+
+  // 同一局面里既可能有「上一步」也可能有被威胁的子：两套光晕共存、颜色各异
+  // 注意别拿 calls.gradients 总数断言——棋子盘面本身也用径向渐变
+  var both = createStubContext();
+  R.draw(both, L, { board: moved, lastMove: move, threats: [C.idxOf(0, 0)] });
+  var amber = both.calls.gradientsSpec.filter(function (g) {
+    return g.stops.length && String(g.stops[0][1]).indexOf('233,168,52') >= 0;
+  });
+  assert('两套光晕共存：上一步的琥珀一圈', amber.length, 1);
+  assert('两套光晕共存：被威胁的绛红一圈', threatGlows(both).length, 1);
 })();
 
 console.log('\n[17] 主题色派生透明度');
