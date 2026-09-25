@@ -11,6 +11,7 @@ var Layout = require('../ui/layout.js');
 var Renderer = require('../ui/renderer.js');
 var Controller = require('../ui/controller.js');
 var Endgame = require('../ui/endgame.js');
+var Particles = require('../ui/particles.js');
 var C = require('../core/constants.js');
 var W = require('../ui/widgets.js');
 
@@ -24,6 +25,15 @@ var BOARD_ASPECT = 10.24 / 9.24;
  * 念到名字时字正好放大到位——声音和落款同拍，而不是各说各的。
  */
 var MATE_VOICE_DELAY = 1000;
+
+/**
+ * AI 搜索每个时间片的预算（毫秒）
+ *
+ * 分片搜索（core/ai.js createSearch）每片最多占用这么久就让出主线程，
+ * 配合 setTimeout(0) 的间隔，UI 能保持约 60fps 渲染「思考中」，
+ * 大师档 8 层搜索也不再整段冻屏。
+ */
+var AI_SLICE_MS = 12;
 
 // ---------------------------------------------------------------------------
 // 屏幕级装饰（美化棋盘上下的留白）
@@ -115,6 +125,11 @@ function createBoardScene(app) {
     controller: null,
     layout: null,
     aiThinking: false,
+    /** 进行中的分片搜索（AI 回合），用于取消与防串台 */
+    aiSearch: null,
+    /** 进行中的提示搜索 */
+    hintSearch: null,
+    hintThinking: false,
     dirty: true,
     lastTs: 0,
     uiBtn: null,
@@ -132,7 +147,12 @@ function createBoardScene(app) {
     /** 终局只播一次（音效 + 语音 + 演出） */
     resultShown: false,
     /** 绝杀演出（替代 wx.showModal） */
-    endgame: new Endgame()
+    endgame: new Endgame(),
+    /** 打击感粒子池（木屑/桂花/冲击波环），固定池、帧内零分配 */
+    fx: Particles.create(64),
+    /** 震屏强度 1→0（吃子落定时置 1，按帧衰减）与震荡相位 */
+    shake: 0,
+    shakePhase: 0
   };
 
   // -------------------------------------------------------------------------
@@ -145,6 +165,8 @@ function createBoardScene(app) {
     scene.endgame.reset();
     scene.resultShown = false;
     scene.mateVoiceTimer = null;
+    scene.fx.clear();
+    scene.shake = 0;
 
     scene.difficulty = app.difficulty;
     scene.humanSide = scene.mode === 'online' ? scene.session.mySide : C.RED;
@@ -210,7 +232,7 @@ function createBoardScene(app) {
 
   scene.canMove = function () {
     if (scene.mode === 'online') return scene.session.canPlay();
-    if (scene.aiThinking) return false;
+    if (scene.aiThinking || scene.hintThinking) return false;
     if (scene.mode === 'local') return true;
     return scene.game.pos.side === scene.humanSide;
   };
@@ -241,22 +263,53 @@ function createBoardScene(app) {
     else fn();
   };
 
-  scene.onAnimEnd = function () {
+  scene.onAnimEnd = function (anim) {
     var fn = scene.afterAnim;
     scene.afterAnim = null;
     scene.dirty = true;
+    // 吃子落定：棋子已磕到位，这一帧起迸木屑、震屏、震落桂花
+    if (anim && anim.captured && anim.captured !== C.EMPTY) scene.impactAt(anim.to);
     if (fn) fn();
+  };
+
+  /**
+   * 吃子打击感三连：震屏（160ms 衰减）+ 木屑迸溅 + 两瓣桂花被震落
+   * @param {number} idx 落点棋盘索引
+   */
+  scene.impactAt = function (idx) {
+    var p = scene.layout.pointOf(idx);
+    var x = scene.boardX + p.x;
+    var y = scene.boardTop + p.y;
+    scene.shake = 1;
+    Particles.burst(scene.fx, x, y, {
+      n: 7, shape: 'chip',
+      colors: ['#c9a06b', '#a97e4f', '#8a6238', '#e2c084'],
+      speed: 240, up: 60, size: [2, 4.5], ttl: [380, 640],
+      gravity: 1100, drag: 1.2, vr: 9
+    });
+    Particles.petal(scene.fx, x - 6, y - 10, { vy: 30, ttl: 2600, alpha: 0.6 });
+    Particles.petal(scene.fx, x + 8, y - 14, { vy: 26, ttl: 3000, alpha: 0.55 });
   };
 
   scene.onIllegal = function (msg) { app.toast(msg || '不符合走法'); };
   scene.onSelect = function () { scene.dirty = true; };
   scene.onCapture = function () { if (wx.vibrateShort) wx.vibrateShort({ type: 'light' }); };
 
-  /** 一步棋的音效：落子/吃子 + 将军警示 */
+  /** 一步棋的音效与观感：落子/吃子 + 将军警示（含冲击波环） */
   scene.sfxMove = function (res) {
     var cap = res && res.entry && res.entry.captured !== C.EMPTY;
     app.audio.play(cap ? 'capture' : 'move');
-    if (!scene.game.result && scene.game.isChecked()) app.audio.play('check');
+    if (!scene.game.result && scene.game.isChecked()) {
+      app.audio.play('check');
+      // 将军冲击波：在被将的将/帅身上扩散一圈，比单纯的脉冲更像「警钟」
+      var kp = scene.game.pos.kingPos[scene.game.pos.side];
+      var pt = scene.layout.pointOf(kp);
+      Particles.ring(scene.fx, scene.boardX + pt.x, scene.boardTop + pt.y, {
+        color: 'rgba(198,32,48,0.9)',
+        size: scene.layout.pieceRadius * 1.15,
+        grow: 300, ttl: 480
+      });
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -291,30 +344,66 @@ function createBoardScene(app) {
   };
 
   // -------------------------------------------------------------------------
-  // AI 回合
+  // AI 回合（分片搜索：每片 AI_SLICE_MS，片间让出主线程渲染「思考中」）
+
+  /** 取消进行中的 AI 搜索（悔棋/重开/离场时调用），后续 tick 会被防串台检查挡掉 */
+  scene.cancelAi = function () {
+    if (scene.aiSearch) { scene.aiSearch.cancel(); scene.aiSearch = null; }
+    scene.aiThinking = false;
+  };
+
+  /** 取消进行中的提示搜索 */
+  scene.cancelHint = function () {
+    if (scene.hintSearch) { scene.hintSearch.cancel(); scene.hintSearch = null; }
+    scene.hintThinking = false;
+  };
+
+  /**
+   * 驱动一次分片搜索：每片最多 AI_SLICE_MS，未完则排在下一个宏任务继续。
+   * onDone(result) 在搜索结束（含被取消，此时 result 为 null）时恰好调用一次。
+   */
+  scene.driveSearch = function (search, onDone) {
+    var tick = function () {
+      var done;
+      try {
+        done = search.step(AI_SLICE_MS);
+      } catch (e) {
+        search.cancel();
+        done = true;
+      }
+      if (!done) { setTimeout(tick, 0); return; }
+      onDone(search.getResult());
+    };
+    setTimeout(tick, 30); // 起手稍等一拍，让玩家的落子动画先被看见
+  };
 
   scene.scheduleAi = function () {
     if (scene.aiThinking || scene.game.result) return;
     scene.aiThinking = true;
     scene.dirty = true;
     scene.refreshStatus();
-    setTimeout(function () {
-      var mv = null;
-      try {
-        mv = AI.findBestMove(scene.game.pos, {
-          level: scene.difficulty,
-          moveNumber: Math.floor(scene.game.plyCount() / 2)
-        });
-      } catch (e) { mv = null; }
+
+    var search = AI.createSearch(scene.game.pos, {
+      level: scene.difficulty,
+      moveNumber: Math.floor(scene.game.plyCount() / 2)
+    });
+    scene.aiSearch = search;
+
+    scene.driveSearch(search, function (mv) {
+      if (scene.aiSearch !== search) return; // 已被悔棋/重开/离场取消
+      scene.aiSearch = null;
       scene.aiThinking = false;
       var res = mv ? scene.game.move(mv.from, mv.to) : null;
-      if (res && res.ok) scene.controller.playMoveAnim(res.entry);
+      if (res && res.ok) {
+        scene.controller.playMoveAnim(res.entry);
+        scene.sfxMove(res);
+      }
       scene.dirty = true;
       scene.refreshStatus();
       scene.runAfterAnim(function () {
         if (scene.game.result) scene.showResult();
       });
-    }, 30);
+    });
   };
 
   // -------------------------------------------------------------------------
@@ -325,6 +414,7 @@ function createBoardScene(app) {
     if (!g) return;
     if (g.result) scene.statusText = g.result.text;
     else if (scene.aiThinking) scene.statusText = 'AI 思考中…';
+    else if (scene.hintThinking) scene.statusText = '提示计算中…';
     else scene.statusText = '轮到 ' + (g.pos.side === C.RED ? '红方' : '黑方') + (g.isChecked() ? '（被将军）' : '');
   };
 
@@ -333,6 +423,12 @@ function createBoardScene(app) {
     scene.resultShown = true;
 
     var result = scene.game.result;
+
+    // 松桂账本：只记人对人的局（本地双人/联机），人机是练棋不入账
+    if (app.ledger) {
+      app.ledger.record({ mode: scene.mode, result: result, humanSide: scene.humanSide });
+    }
+
     var win = scene.mode === 'local' ? true : (result.winner === scene.humanSide);
     app.audio.play(win ? 'win' : 'lose');
 
@@ -429,30 +525,53 @@ function createBoardScene(app) {
   scene.toolAction = function (id) {
     if (id === 'undo') app.audio.play('undo');
     else app.audio.play('tap');
-    if (id === 'back') { scene.leave(); app.go('menu'); return; }
+    if (id === 'back') { scene.cancelAi(); scene.cancelHint(); scene.leave(); app.go('menu'); return; }
     if (id === 'undo') {
       if (scene.mode === 'online') { app.toast('联机不可悔棋'); return; }
-      if (scene.aiThinking || !scene.game.history.length) return;
-      scene.game.undo(scene.mode === 'ai' ? 2 : 1);
+      if (!scene.game.history.length) return;
+      // AI 思考中悔棋 = 撤回自己刚走的那一手（并取消 AI）；
+      // 平时人机悔两手（人 + AI），本地双人悔一手
+      var wasThinking = scene.aiThinking;
+      if (wasThinking) scene.cancelAi();
+      scene.cancelHint();
+      scene.game.undo(scene.mode === 'ai' && !wasThinking ? 2 : 1);
       scene.controller.reset();
       scene.afterAnim = null;
       scene.dirty = true; scene.refreshStatus();
       return;
     }
     if (id === 'hint') {
-      if (!scene.controller.canOperate()) { app.toast('现在不能提示'); return; }
-      var h = AI.getHint(scene.game.pos);
-      if (h) { scene.controller.setHint({ from: h.from, to: h.to }); scene.dirty = true; }
+      if (!scene.controller.canOperate() || scene.hintThinking || scene.aiThinking) {
+        app.toast('现在不能提示');
+        return;
+      }
+      // 提示也走分片搜索：困难档深度 6 不再冻住棋盘
+      var hs = AI.createSearch(scene.game.pos, { level: 'hard', moveNumber: 9999 });
+      scene.hintSearch = hs;
+      scene.hintThinking = true;
+      scene.dirty = true;
+      scene.refreshStatus();
+      scene.driveSearch(hs, function (r) {
+        if (scene.hintSearch !== hs) return; // 已被取消
+        scene.hintSearch = null;
+        scene.hintThinking = false;
+        if (r) scene.controller.setHint({ from: r.from, to: r.to });
+        scene.dirty = true;
+        scene.refreshStatus();
+      });
       return;
     }
     if (id === 'flip') { scene.layout.setFlipped(!scene.layout.flipped); scene.dirty = true; return; }
     if (id === 'restart') {
       if (scene.mode === 'online') { app.toast('联机不可重开'); return; }
-      scene.aiThinking = false;
+      scene.cancelAi();
+      scene.cancelHint();
       scene.afterAnim = null;
       scene.resultShown = false;
       scene.clearMateVoice();
       scene.endgame.reset();
+      scene.fx.clear();
+      scene.shake = 0;
       scene.game = new Game();
       scene.controller.setGame(scene.game);
       scene.dirty = true; scene.refreshStatus();
@@ -470,23 +589,38 @@ function createBoardScene(app) {
   scene.onExit = function () {
     // 离开对局场景时若仍在联机，通知对手（菜单返回已 leave，这里兜底）
     if (scene.mode === 'online' && scene.session && scene.session.state === 'playing') scene.leave();
-    // 撤掉还没播出的杀法语音，别在菜单里突然冒出一句；演出一并清掉
+    // 取消还在跑的分片搜索，别让迟到的 AI 走子落在别的场景上
+    scene.cancelAi();
+    scene.cancelHint();
+    // 撤掉还没播出的杀法语音，别在菜单里突然冒出一句；演出与粒子一并清掉
     scene.clearMateVoice();
     scene.endgame.reset();
+    scene.fx.clear();
+    scene.shake = 0;
   };
 
   // -------------------------------------------------------------------------
   // 渲染
 
   scene.shouldRender = function (dt) {
-    // 拖拽中、走子动画中、落子余晖未散、绝杀演出未播完、被将军时都需要按帧重绘
+    var fxAlive = scene.fx.count() > 0 || scene.shake > 0;
+    // 拖拽中、走子动画中、落子余晖未散、绝杀演出未播完、被将军、粒子未落尽时都需要按帧重绘
     var anim = !!scene.controller.drag || scene.controller.isAnimating() ||
       scene.controller.isLanding() ||
       (scene.endgame.isActive() && !scene.endgame.isDone()) ||
-      (!scene.game.result && scene.game.isChecked());
+      (!scene.game.result && scene.game.isChecked()) ||
+      fxAlive;
     if (anim) {
       scene.controller.tick(dt);
       scene.endgame.tick(dt);
+      if (fxAlive) {
+        scene.fx.tick(dt);
+        if (scene.shake > 0) {
+          scene.shake -= (dt || 16) / 160;
+          if (scene.shake < 0) scene.shake = 0;
+          scene.shakePhase += (dt || 16) * 0.11;
+        }
+      }
       scene.dirty = true;
     }
     return scene.dirty;
@@ -495,6 +629,13 @@ function createBoardScene(app) {
   scene.render = function (ctx, w, h) {
     scene.dirty = false;
     drawScreenBg(ctx, w, h);
+
+    // 吃子震屏：整屏（含工具栏）随正弦震荡偏移，强度按平方衰减
+    ctx.save();
+    if (scene.shake > 0) {
+      var m = 3.2 * scene.shake * scene.shake;
+      ctx.translate(Math.sin(scene.shakePhase) * m, Math.cos(scene.shakePhase * 1.31) * m * 0.7);
+    }
 
     var boardBottom = scene.boardTop + scene.boardHeight;
 
@@ -518,7 +659,12 @@ function createBoardScene(app) {
     // 工具栏
     for (var i = 0; i < scene.toolbar.length; i++) W.drawButton(ctx, scene.toolbar[i], scene.uiBtn === scene.toolbar[i].id);
 
+    // 打击感粒子：画在棋盘之上、震屏坐标系之内（跟着屏一起震才对味）
+    scene.fx.draw(ctx);
+    ctx.restore();
+
     // 绝杀演出盖在工具栏之上：终局时整屏进入结算，不再有工具栏的干扰
+    // （演出不随震屏——它是结算镜头，机位要稳）
     if (scene.endgame.isActive()) {
       scene.endgame.draw(ctx, w, h, scene.boardX, scene.boardTop);
     }

@@ -16,6 +16,7 @@ var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
 var audio = require('./ui/audio.js');
 var NET_CONFIG = require('./net/config.js');
+var Ledger = require('./core/ledger.js');
 
 audio.init();
 
@@ -48,6 +49,11 @@ var app = {
   cloudReady: false,
   audio: audio,
   pendingRoom: null,
+  /** 松桂账本：本机持久化的二人战绩（core/ledger.js，存储失败时降级内存账） */
+  ledger: Ledger.create({
+    get: function (k) { try { return wx.getStorageSync(k) || null; } catch (e) { return null; } },
+    set: function (k, v) { try { wx.setStorageSync(k, v); } catch (e) {} }
+  }),
 
   go: function (name, params) { return manager.show(name, params); },
 

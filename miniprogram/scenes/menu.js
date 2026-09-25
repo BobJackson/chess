@@ -3,6 +3,39 @@
  */
 var W = require('../ui/widgets.js');
 var AI = require('../core/ai.js');
+var Particles = require('../ui/particles.js');
+
+/** 桂花粒子：每瓣间隔（毫秒）与同屏上限（极淡，不抢视线） */
+var PETAL_INTERVAL = 380;
+var PETAL_MAX = 16;
+
+/**
+ * 松桂账本：副标题下方的比分行
+ * 有账时「松 12 : 9 桂」用描题色加粗、两侧饰线；无账时低调一行小字
+ */
+function drawLedger(ctx, w, y, app) {
+  var line1 = app.ledger.line();
+  var line2 = app.ledger.lastLine();
+  var hasGames = app.ledger.summary().total > 0;
+
+  if (hasGames) {
+    ctx.save();
+    W.setFont(ctx, 14, true);
+    var tw = ctx.measureText(line1).width;
+    var cx = w / 2;
+    ctx.strokeStyle = 'rgba(93,64,55,0.30)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - tw / 2 - 32, y); ctx.lineTo(cx - tw / 2 - 12, y);
+    ctx.moveTo(cx + tw / 2 + 12, y); ctx.lineTo(cx + tw / 2 + 32, y);
+    ctx.stroke();
+    ctx.restore();
+    W.drawText(ctx, line1, cx, y, 14, W.THEME.title, 'center', true);
+    if (line2) W.drawText(ctx, line2, cx, y + 18, 11, W.THEME.subtitle, 'center');
+  } else {
+    W.drawText(ctx, line1, w / 2, y, 12, W.THEME.subtitle, 'center');
+  }
+}
 
 function createMenuScene(app) {
   var scene = {
@@ -11,7 +44,10 @@ function createMenuScene(app) {
     buttons: [],
     seg: null,
     levels: AI.LEVEL_ORDER.map(function (k) { return AI.LEVELS[k].label; }),
-    pressed: null
+    pressed: null,
+    /** 桂花常驻粒子（松风起，桂子落——品牌气质第一眼可见） */
+    fx: Particles.create(40),
+    petalAcc: 300
   };
 
   scene.onEnter = function () {
@@ -90,10 +126,22 @@ function createMenuScene(app) {
     }
   };
 
-  scene.render = function (ctx, w, h) {
+  scene.render = function (ctx, w, h, dt) {
+    var ms = dt || 16;
+    scene.petalAcc += ms;
+    if (scene.petalAcc >= PETAL_INTERVAL && scene.fx.count() < PETAL_MAX) {
+      scene.petalAcc = 0;
+      Particles.petal(scene.fx, 12 + Math.random() * (w - 24), -12, {
+        ttl: (h + 80) / 30 * 1000, alpha: 0.42
+      });
+    }
+    scene.fx.tick(ms);
+
     W.fillBackground(ctx, w, h);
     W.drawText(ctx, '松风桂月', w / 2, h * 0.14, 32, W.THEME.title, 'center', true);
     W.drawText(ctx, '人机对战 · 本地双人 · 好友联机', w / 2, h * 0.14 + 30, 13, W.THEME.subtitle, 'center');
+
+    if (app.ledger) drawLedger(ctx, w, h * 0.14 + 60, app);
 
     W.drawText(ctx, 'AI 难度', scene.seg.x, scene.seg.y - 14, 13, W.THEME.body);
     var sel = AI.LEVEL_ORDER.indexOf(app.difficulty);
@@ -110,6 +158,9 @@ function createMenuScene(app) {
       W.drawButton(ctx, scene.toggles[g], scene.pressed === scene.toggles[g].id);
     }
     W.drawText(ctx, '人机与本地双人纯本地运行 · 联机需云开发', w / 2, h - 24, 11, W.THEME.subtitle, 'center');
+
+    // 桂花落在最上层（极淡，像从屏前飘过）
+    scene.fx.draw(ctx);
   };
 
   return scene;

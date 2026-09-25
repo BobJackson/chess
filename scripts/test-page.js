@@ -138,6 +138,9 @@ var fakeCloud = createFakeCloud();
 /** 记录所有被播放的音频源，用于验证绝杀语音确实被请求 */
 var audioSrcs = [];
 
+/** 内存 wx storage（松桂账本持久化） */
+var storageData = {};
+
 function makeAudioCtx() {
   var c = {
     src: '', loop: false, volume: 1, currentTime: 0, plays: 0,
@@ -180,6 +183,8 @@ global.wx = {
   onShow: function (cb) { showHandlers.push(cb); },
   onHide: function () {},
   createInnerAudioContext: makeAudioCtx,
+  getStorageSync: function (k) { return storageData[k] || ''; },
+  setStorageSync: function (k, v) { storageData[k] = v; },
   cloud: { database: function () { return fakeCloud.db; }, init: function () {} }
 };
 global.setTimeout = function (fn) { fn(); return 0; };
@@ -508,6 +513,126 @@ console.log('\n[9] 联机终局只给「回菜单」');
   eg2.start({ winner: 0, reason: '将死' }, { online: false });
   var ids2 = eg2.layoutButtons(375, 700).map(function (x) { return x.id; });
   assert('人机/本地有两个按钮', ids2.join(','), 'again,menu');
+})();
+
+console.log('\n[10] 松桂账本：人对人记账与菜单展示');
+(function () {
+  var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+  var texts = global.__canvas.ctx.calls.fillText;
+
+  // 第 [1] 节菜单首绘时账本还是空的，空账文案应已上过屏
+  truthy('空账文案上过屏', texts.indexOf('松桂账本 · 待首局开枰') >= 0);
+
+  /** 终局演出 → 跳过 → 点「回菜单」 */
+  function leaveViaEndgame(b) {
+    b.endgame.skip();
+    pumpMs(16);
+    var menuBtn = null;
+    b.endgame.buttons.forEach(function (x) { if (x.id === 'menu') menuBtn = x; });
+    truthy('演出有「回菜单」按钮', menuBtn);
+    tap(menuBtn.x + menuBtn.w / 2, menuBtn.y + menuBtn.h / 2);
+  }
+
+  // 本地双人：黑胜 → 桂记一胜（本地红=松、黑=桂）
+  var c = buttonCenter(manager.current, 'local');
+  tap(c.x, c.y);
+  assert('进入本地双人', manager.current.name, 'board');
+  var b = manager.current;
+  b.game.finish(C.BLACK, '将死');
+  b.showResult();
+  var s1 = app.ledger.summary();
+  assert('黑胜记入桂', s1.gui, 1);
+  assert('松仍为零', s1.song, 0);
+  assert('总局数为 1', s1.total, 1);
+  leaveViaEndgame(b);
+  assert('返回菜单', manager.current.name, 'menu');
+  pump(16);
+  truthy('菜单比分行上过屏', texts.indexOf('松 0 : 1 桂') >= 0);
+  truthy('最近局文案格式', /^上局 桂胜 · 双人 · \d{2}-\d{2}$/.test(app.ledger.lastLine()));
+
+  // 联机：本机（房主执红）胜 → 松记一胜
+  var pair = NT.createLoopbackPair();
+  var host = new OnlineSession(pair[0], { clientId: 'h2' });
+  var guest = new OnlineSession(pair[1], { clientId: 'g2' });
+  host.createRoom('LG01');
+  guest.joinRoom('LG01');
+  app.session = host;
+  app.transport = pair[0];
+  app.go('board', { mode: 'online' });
+  var ob = manager.current;
+  ob.game.finish(ob.humanSide, '将死');
+  ob.showResult();
+  var s2 = app.ledger.summary();
+  assert('联机本机胜记入松', s2.song, 1);
+  assert('总局数累加到 2', s2.total, 2);
+  leaveViaEndgame(ob);
+  assert('联机退出回菜单', manager.current.name, 'menu');
+  assert('联机退出清理会话', app.session, null);
+  pump(16);
+  truthy('累计比分行上过屏', texts.indexOf('松 1 : 1 桂') >= 0);
+  truthy('最近局为联机', app.ledger.lastLine().indexOf('联机') >= 0);
+
+  // 人机：练棋不入账
+  var c2 = buttonCenter(manager.current, 'ai');
+  tap(c2.x, c2.y);
+  var ab = manager.current;
+  ab.game.finish(ab.humanSide, '将死');
+  ab.showResult();
+  assert('人机局不入账', app.ledger.summary().total, 2);
+  leaveViaEndgame(ab);
+  assert('返回菜单收尾', manager.current.name, 'menu');
+
+  // 账本已写入 wx storage（下次启动可读）
+  truthy('账本已持久化到 storage', !!storageData['songgui-ledger-v1']);
+  assert('存储中的总局数', storageData['songgui-ledger-v1'].total, 2);
+})();
+
+console.log('\n[11] 打击感：吃子震屏 + 木屑粒子 + 将军冲击波');
+(function () {
+  var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+
+  var c = buttonCenter(manager.current, 'local');
+  tap(c.x, c.y);
+  assert('进入本地双人', manager.current.name, 'board');
+  var b = manager.current;
+
+  // 红车吃黑车、且吃完与同列黑将照面（既吃子又将军）
+  b.game = new Game('4k4/9/4r4/9/9/4R4/9/9/9/4K4 w - - 0 1');
+  b.controller.setGame(b.game);
+  b.fx.clear();
+  b.shake = 0;
+
+  b.controller.requestMove(C.idxOf(4, 5), C.idxOf(4, 2));
+  assert('吃子走成', b.game.history.length, 1);
+  assert('吃完将军', b.game.isChecked(), true);
+  truthy('将军冲击波已入池', b.fx.count() > 0);
+
+  // 走子动画 200ms：播到 240ms 时落定冲击（震屏/木屑）已触发且未衰减完
+  pumpMs(240);
+  truthy('吃子震屏中', b.shake > 0);
+  truthy('木屑/桂花粒子活跃', b.fx.count() > 0);
+
+  // 震屏 160ms 衰减完毕
+  pumpMs(1000);
+  assert('震屏已衰减归零', b.shake, 0);
+
+  // 被吃棋子的击飞绘制不崩（动画期间的渲染路径已随 pump 覆盖）
+  var back = centerOf(b.toolbar[4]);
+  tap(back.x, back.y);
+  assert('返回菜单', manager.current.name, 'menu');
+})();
+
+console.log('\n[12] 菜单桂花粒子');
+(function () {
+  // 菜单每帧渲染，粒子按 380ms 间隔飘落；推 1.2s 应有花瓣入池
+  var m = manager.current;
+  m.fx.clear();
+  pumpMs(1200);
+  truthy('菜单桂花飘落中', m.fx.count() > 0);
+  pumpMs(4000);
+  truthy('花瓣数量受上限约束', m.fx.count() <= 16);
 })();
 
 console.log('\n----------------------------------------');

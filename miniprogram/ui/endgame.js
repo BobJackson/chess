@@ -4,21 +4,25 @@
  * 替代原来的 wx.showModal 纯文字弹窗：终局时在棋盘上演一段「怎么杀的」，
  * 再落款给出杀法名与结果，最后浮出「再来一局 / 回菜单」两个按钮。
  *
- * 三拍时间线：
+ * 镜头化时间线（三拍 + 两处剪辑手法）：
  *   ① 压暗   棋盘蒙一层暗场，其余棋子沉下去
- *   ② 演示   按 result.mateInfo 的几何，画出该杀法的专属母题（见 drawMotif）
- *   ③ 落款   杀法名以书法字放大落款 + 胜负 + 按钮浮出
+ *   ② 演示   按 result.mateInfo 的几何画出该杀法的专属母题；
+ *            同时整盘向「将」缓推 1.06x（推镜，把视线押到要害上）
+ *   ②.5 顿帧  演示毕、落款前静止 130ms——重击前的沉默，电影重击感来源
+ *   ③ 落款   杀法名以书法字放大落款，金墨滴溅落 + 胜负 + 按钮浮出
  *
  * 交互约定：
  *   - 演出途中点屏幕 -> 直接跳到落款（每局等两秒会烦，跳过是必须的）
  *   - 落款后按钮才可点，按钮出现前点屏幕只会跳过
  *
- * 只依赖 Canvas 2D（棋子与光晕复用 ui/renderer），可在 node 下用桩上下文单测。
+ * 只依赖 Canvas 2D（棋子与光晕复用 ui/renderer，墨滴用 ui/particles），
+ * 可在 node 下用桩上下文单测。
  */
 
 var C = require('../core/constants.js');
 var Renderer = require('./renderer.js');
 var W = require('./widgets.js');
+var Particles = require('./particles.js');
 
 // ---------------------------------------------------------------------------
 // 时间线（毫秒）
@@ -26,9 +30,13 @@ var W = require('./widgets.js');
 
 var T_DIM = 350;    // ① 压暗结束
 var T_SHOW = 1050;  // ② 演示杀招结束
-var T_NAME = 1750;  // ③ 落款浮现结束
-var T_UI = 2050;    // 按钮浮出结束
+var T_HOLD = 1180;  // ②.5 顿帧结束
+var T_NAME = 1880;  // ③ 落款浮现结束
+var T_UI = 2180;    // 按钮浮出结束
 var T_END = T_UI + 300;
+
+/** 推镜幅度：演示拍向将缓推的倍率（1 → 1+ZOOM） */
+var ZOOM = 0.06;
 
 /** 演出配色：与棋盘「上一步发光」同一支琥珀，保证是一套语言 */
 var FX = {
@@ -69,6 +77,13 @@ function Endgame() {
   this.win = true;
   this.buttons = [];
   this.pressed = null;
+  /** 落款金墨滴（自建小池，与对局粒子互不干扰） */
+  this.fx = Particles.create(20);
+  /** 墨滴是否已溅（顿帧结束进入落款时触发一次） */
+  this._inked = false;
+  /** 最近一次 draw 的屏幕尺寸（tick 里定位墨滴用） */
+  this._w = 0;
+  this._h = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +108,8 @@ Endgame.prototype.start = function (result, opts) {
   this.win = opts.win !== false;
   this.online = !!opts.online;
   this.buttons = [];
+  this.fx.clear();
+  this._inked = false;
   return this;
 };
 
@@ -101,6 +118,8 @@ Endgame.prototype.reset = function () {
   this.t = 0;
   this.pressed = null;
   this.buttons = [];
+  this.fx.clear();
+  this._inked = false;
   return this;
 };
 
@@ -114,14 +133,34 @@ Endgame.prototype.tick = function (dt) {
   if (!this.active) return this.t;
   this.t += (dt || 16);
   if (this.t > T_END) this.t = T_END;
+  // 顿帧结束、落款起笔：溅金墨滴（只溅一次）
+  if (!this._inked && this.t >= T_HOLD && this.t < T_END) {
+    this._inked = true;
+    this._splashInk();
+  }
+  this.fx.tick(dt);
   return this.t;
 };
 
-/** 跳过演出：直接落到落款完成态 */
+/** 跳过演出：直接落到落款完成态（不再补墨滴，跳就跳干净） */
 Endgame.prototype.skip = function () {
   if (!this.active) return false;
   this.t = T_END;
+  this._inked = true;
   return true;
+};
+
+/** 落款起笔时的金墨滴：从标题字的位置向外溅落 */
+Endgame.prototype._splashInk = function () {
+  if (!this._w || !this._h) return;
+  var card = this.cardRect(this._w, this._h);
+  Particles.burst(this.fx, card.x + card.w / 2, card.y + 46, {
+    n: 6, shape: 'drop',
+    colors: ['#f2dcae', '#d9b878', '#b98f52'],
+    speed: 130, dirX: 0, dirY: -1, spread: Math.PI * 1.2,
+    size: [1.4, 2.8], ttl: [420, 720],
+    gravity: 1500, vr: 4
+  });
 };
 
 /** 落款是否已经浮现（决定点击是「跳过」还是「命中按钮」） */
@@ -198,11 +237,13 @@ Endgame.prototype.subtitle = function () {
  */
 Endgame.prototype.draw = function (ctx, w, h, boardX, boardY) {
   if (!this.active) return;
+  this._w = w;
+  this._h = h;
 
   var t = this.t;
   var pDim = easeOut(seg(t, 0, T_DIM));
   var pShow = seg(t, T_DIM, T_SHOW);
-  var pName = easeOut(seg(t, T_SHOW, T_NAME));
+  var pName = easeOut(seg(t, T_HOLD, T_NAME));
   var pUi = easeOut(seg(t, T_NAME, T_UI));
 
   // ① 压暗：连工具栏一起盖住，整屏进入结算
@@ -212,24 +253,48 @@ Endgame.prototype.draw = function (ctx, w, h, boardX, boardY) {
   ctx.fillRect(0, 0, w, h);
   ctx.restore();
 
-  // ② 演示：先把杀招相关的棋子重画一遍浮出暗场，再画母题
+  // ② 演示：先把杀招相关的棋子重画一遍浮出暗场，再画母题。
+  // 推镜：整盘以「将」为焦点缓推 1+ZOOM，顿帧保持，落款时缓退还原——
+  // 只推高亮与母题这一层，暗场与结算卡不动（镜头推的是棋盘，不是 UI）
   var L = this.layout;
   if (L && this.board && this.mateInfo) {
+    var zoom = 1 + ZOOM * easeOut(seg(t, T_DIM * 0.5, T_SHOW)) -
+      ZOOM * easeOut(seg(t, T_HOLD, T_NAME));
+    ctx.save();
+    if (zoom > 1.0005 && this.mateInfo.king !== null && this.mateInfo.king !== undefined) {
+      var kp = L.pointOf(this.mateInfo.king);
+      var fx0 = boardX + kp.x;
+      var fy0 = boardY + kp.y;
+      ctx.translate(fx0, fy0);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-fx0, -fy0);
+    }
     ctx.save();
     ctx.translate(boardX, boardY);
-    drawHighlights(ctx, L, this.board, this.mateInfo, pDim);
+    // 动作层调度：跃迁的马/冲锋的车在高亮层让位；将按命中时刻表震颤
+    var plan = actorsPlan(this.mateInfo, pShow);
+    plan.shakeQ = actorShake(this.mateInfo, pShow);
+    drawHighlights(ctx, L, this.board, this.mateInfo, pDim, plan);
     drawMotif(ctx, L, this.mateInfo, pShow);
+    paintActors(ctx, L, this.board, this.mateInfo, pShow);
+    ctx.restore();
     ctx.restore();
   }
 
   // ③ 落款
   this.layoutButtons(w, h);
   drawCard(ctx, w, h, this, pName, pUi);
+
+  // 金墨滴盖在卡片之上（墨是溅出来的，不该被卡片边缘裁掉）
+  this.fx.draw(ctx);
 };
 
 /** 把构成该杀法的棋子 + 被将的将浮出暗场 */
-function drawHighlights(ctx, L, board, info, p) {
+function drawHighlights(ctx, L, board, info, p, opts) {
   if (p <= 0) return;
+  opts = opts || {};
+  var hide = opts.hide || null;
+  var shakeQ = opts.shakeQ || 0;
   var idxs = (info.pieces || []).slice();
   if (info.king !== null && info.king !== undefined) idxs.push(info.king);
 
@@ -244,6 +309,14 @@ function drawHighlights(ctx, L, board, info, p) {
   for (i = 0; i < idxs.length; i++) {
     var k = idxs[i];
     if (k < 0 || k >= C.BOARD_SIZE || board[k] === C.EMPTY) continue;
+    // 演员（跃迁的马/冲锋的车）由动作层另画，这里让位，避免双重影像
+    if (hide && hide[k]) continue;
+    // 将中弹震颤：横向快速衰减抖动
+    if (shakeQ > 0 && k === info.king) {
+      var dx = Math.sin(shakeQ * Math.PI * 5) * L.cell * 0.055 * (1 - shakeQ);
+      Renderer.drawPieceAt(ctx, L, L.xOf(k) + dx, L.yOf(k), board[k], null);
+      continue;
+    }
     Renderer.drawPiece(ctx, L, k, board[k], null);
   }
   ctx.restore();
@@ -518,6 +591,311 @@ function lockLines(ctx, L, pawns, kingIdx, p) {
     glowLine(ctx, L, pp.x, pp.y,
       pp.x + (kp.x - pp.x) * q, pp.y + (kp.y - pp.y) * q, 0.05);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 动作层：棋子亲自演（炮弹 / 马跃 / 车冲 / 命中反馈），叠加在线条母题之上
+//
+// 全部是进度 p 的纯函数（无内部状态、无随机源），可复现、可单测；
+// 线条母题降级为弹道/轨迹底衬，演员层负责「形象」。
+// ---------------------------------------------------------------------------
+
+var KNIGHT_KEYS = { wocaoma: 1, guajiaoma: 1, diaoyuma: 1, cemianhu: 1 };
+
+/**
+ * 炮弹：炮口聚能（前 18%）→ 火球带尾迹沿 (a→b) 飞出
+ * q 为本发炮弹的局部进度 0~1；q>=1 时炮弹已炸，不再绘制
+ */
+function shell(ctx, L, a, b, q) {
+  if (q <= 0 || q >= 1) return;
+  var fly = clamp01((q - 0.18) / 0.82);
+  ctx.save();
+  if (fly <= 0) {
+    // 聚能：炮口光点膨胀
+    var charge = q / 0.18;
+    ctx.globalAlpha = 0.5 + 0.5 * charge;
+    ctx.fillStyle = FX.pulse;
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, L.pieceRadius * (0.15 + 0.45 * charge), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  // 尾迹三点：越靠后越小越淡
+  var i, tb;
+  ctx.fillStyle = FX.line;
+  for (i = 1; i <= 3; i++) {
+    tb = fly - i * 0.07;
+    if (tb <= 0) continue;
+    ctx.globalAlpha = 0.55 * (1 - i / 4);
+    ctx.beginPath();
+    ctx.arc(a.x + (b.x - a.x) * tb, a.y + (b.y - a.y) * tb,
+      L.pieceRadius * (0.30 - i * 0.06), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 火球本体：径向渐变的光球
+  var x = a.x + (b.x - a.x) * fly;
+  var y = a.y + (b.y - a.y) * fly;
+  var r = L.pieceRadius * 0.5;
+  var g = ctx.createRadialGradient(x, y, r * 0.15, x, y, r);
+  g.addColorStop(0, 'rgba(255,236,180,1)');
+  g.addColorStop(0.45, 'rgba(255,180,80,0.85)');
+  g.addColorStop(1, 'rgba(220,80,30,0)');
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * 命中爆点：星芒八道（先长后缩）+ 火花五粒（固定角度，不用随机源）+ 扩散环
+ * q 0~1，窗外不画
+ */
+function explosion(ctx, L, pt, q) {
+  if (q <= 0 || q >= 1) return;
+  var i;
+  ctx.save();
+  // 星芒
+  var grow = q < 0.4 ? q / 0.4 : 1 - (q - 0.4) / 0.6;
+  var ray = L.cell * (0.12 + 0.55 * grow);
+  ctx.strokeStyle = FX.line;
+  ctx.globalAlpha = 1 - q * 0.7;
+  ctx.lineWidth = Math.max(1, L.cell * 0.05 * (1 - q * 0.5));
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (i = 0; i < 8; i++) {
+    var ang = i * Math.PI / 4 + Math.PI / 8;
+    ctx.moveTo(pt.x + Math.cos(ang) * ray * 0.3, pt.y + Math.sin(ang) * ray * 0.3);
+    ctx.lineTo(pt.x + Math.cos(ang) * ray, pt.y + Math.sin(ang) * ray);
+  }
+  ctx.stroke();
+  // 火花：向外飞散、微微上飘、淡出
+  ctx.fillStyle = FX.pulse;
+  for (i = 0; i < 5; i++) {
+    var a2 = i * (Math.PI * 2 / 5) + 0.6;
+    var d = L.cell * 0.9 * q;
+    ctx.globalAlpha = 0.9 * (1 - q);
+    ctx.beginPath();
+    ctx.arc(pt.x + Math.cos(a2) * d, pt.y + Math.sin(a2) * d - L.cell * 0.2 * q * q,
+      Math.max(0.6, 2.2 * (1 - q)), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 扩散环
+  ctx.globalAlpha = 0.7 * (1 - q);
+  ctx.strokeStyle = FX.pulse;
+  ctx.lineWidth = Math.max(0.8, L.cell * 0.05 * (1 - q));
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, L.pieceRadius + L.cell * 0.5 * q, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 炮架亮一下：炮弹掠过瞬间按钟形窗提亮（点出「它是炮架」） */
+function screenFlash(ctx, L, idx, q) {
+  if (q <= 0 || q >= 1 || idx === null || idx === undefined) return;
+  var bell = Math.sin(Math.PI * q);
+  Renderer.drawPieceGlow(ctx, L, idx, FX.pulse, bell * 0.8);
+}
+
+/**
+ * 炮系动作：每门炮错拍 0.16 出一发炮弹，弹着点爆点；最后一发大爆
+ * @param {number[]} cannons 开炮的棋子（按出膛顺序）
+ * @param {number} [glowIdx] 炮弹掠过时需要提亮的炮架
+ */
+function cannonActors(ctx, L, info, p, cannons, glowIdx) {
+  var kp = L.pointOf(info.king);
+  for (var i = 0; i < cannons.length; i++) {
+    var a = L.pointOf(cannons[i]);
+    var q = clamp01((p - i * 0.16) / 0.56);
+    shell(ctx, L, a, kp, q);
+    // 炮弹掠过炮架：按飞行进度与炮架位置的距离开窗
+    if (glowIdx !== null && glowIdx !== undefined && i === 0 && info.screen !== null && info.screen !== undefined) {
+      var fly = clamp01((q - 0.18) / 0.82);
+      var sp = screenProgress(L, info.checker, info.screen, info.king);
+      screenFlash(ctx, L, glowIdx, clamp01((fly - (sp - 0.12)) / 0.24));
+    }
+    // 弹着爆点：本发命中时刻 hit = i*0.16 + 0.56
+    explosion(ctx, L, kp, clamp01((p - (i * 0.16 + 0.56)) / 0.30));
+  }
+}
+
+/** 炮系命中时刻表（与 cannonActors 的错拍一致，供将震颤纯函数使用） */
+function cannonHits(info) {
+  var key = info.key;
+  var n = 1;
+  if (key === 'chongpao' || key === 'tiandipao' || key === 'jiachepao') n = 2;
+  var hits = [];
+  for (var i = 0; i < n; i++) hits.push(i * 0.16 + 0.56);
+  return hits;
+}
+
+/** 马系动作：马沿日字两跳（各带抛物抬升），身后残影，拐角与落点踏尘环 */
+function knightActors(ctx, L, info, p, board) {
+  if (p <= 0.02 || p >= 0.97) return;
+  var a = L.pointOf(info.checker);
+  var b = L.pointOf(info.king);
+  var dx = b.x - a.x;
+  var dy = b.y - a.y;
+  var corner = Math.abs(dx) > Math.abs(dy) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
+  var leg1 = Math.abs(corner.x - a.x) + Math.abs(corner.y - a.y);
+  var leg2 = Math.abs(b.x - corner.x) + Math.abs(b.y - corner.y);
+  var total = leg1 + leg2;
+  if (total <= 0) return;
+
+  function posAt(q) {
+    var d = total * clamp01(q);
+    if (d <= leg1) {
+      var t = leg1 > 0 ? d / leg1 : 1;
+      return {
+        x: a.x + (corner.x - a.x) * t,
+        y: a.y + (corner.y - a.y) * t - L.cell * 0.30 * Math.sin(Math.PI * t)
+      };
+    }
+    var t2 = leg2 > 0 ? (d - leg1) / leg2 : 1;
+    return {
+      x: corner.x + (b.x - corner.x) * t2,
+      y: corner.y + (b.y - corner.y) * t2 - L.cell * 0.30 * Math.sin(Math.PI * t2)
+    };
+  }
+
+  var piece = board[info.checker];
+  // 残影两匹：滞后 0.09 / 0.045，越拖越淡
+  var ghosts = [0.09, 0.045];
+  for (var i = 0; i < ghosts.length; i++) {
+    var gq = p - ghosts[i];
+    if (gq <= 0.02) continue;
+    var gp = posAt(gq);
+    Renderer.drawPieceAt(ctx, L, gp.x, gp.y, piece, { alpha: 0.14 + i * 0.13 });
+  }
+  // 本体（略放大，奔腾感）
+  var pos = posAt(p);
+  Renderer.drawPieceAt(ctx, L, pos.x, pos.y, piece, { scale: 1.06 });
+
+  // 蹄印尘环：第一跳落拐角、第二跳踏向将
+  var split = leg1 / total;
+  drawDustRing(ctx, L, corner, clamp01((p - split) / 0.18));
+  drawDustRing(ctx, L, b, clamp01((p - 0.9) / 0.1));
+  // 踏将爆点
+  explosion(ctx, L, b, clamp01((p - 0.88) / 0.12));
+}
+
+/** 落定尘环：一小圈外扩的淡环（pulseRings 的坐标版） */
+function drawDustRing(ctx, L, pt, q) {
+  if (q <= 0 || q >= 1) return;
+  ctx.save();
+  ctx.globalAlpha = 0.6 * (1 - q);
+  ctx.strokeStyle = FX.pulse;
+  ctx.lineWidth = Math.max(0.8, L.cell * 0.05 * (1 - q * 0.5));
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, L.pieceRadius * 0.6 + L.cell * 0.35 * q, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 车系动作：每枚车错拍向将实冲一段（正弦去回），车尾拉三条速度线 */
+function rookActors(ctx, L, info, p, board) {
+  var kp = L.pointOf(info.king);
+  for (var i = 0; i < info.pieces.length; i++) {
+    var idx = info.pieces[i];
+    var q = clamp01((p - i * 0.22) / 0.6);
+    if (q <= 0 || q >= 1) continue;
+    var a = L.pointOf(idx);
+    var dx = kp.x - a.x;
+    var dy = kp.y - a.y;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= 0) continue;
+    dx /= d; dy /= d;
+
+    var push = Math.sin(Math.PI * q) * L.cell * 0.42;
+    // 速度线：冲得越猛越长（与位移同相）
+    var vigor = Math.sin(Math.PI * q);
+    ctx.save();
+    ctx.strokeStyle = FX.line;
+    ctx.lineCap = 'round';
+    for (var j = 0; j < 3; j++) {
+      var off = L.pieceRadius + L.cell * (0.10 + j * 0.13);
+      var len = L.cell * 0.34 * vigor * (1 - j * 0.25);
+      if (len <= 0.5) continue;
+      ctx.globalAlpha = 0.75 * vigor * (1 - j * 0.28);
+      ctx.lineWidth = Math.max(1, L.cell * (0.055 - j * 0.012));
+      ctx.beginPath();
+      ctx.moveTo(a.x + dx * push - dx * off, a.y + dy * push - dy * off);
+      ctx.lineTo(a.x + dx * push - dx * (off + len), a.y + dy * push - dy * (off + len));
+      ctx.stroke();
+    }
+    ctx.restore();
+    Renderer.drawPieceAt(ctx, L, a.x + dx * push, a.y + dy * push, board[idx], { scale: 1.04 });
+  }
+}
+
+/**
+ * 将震颤进度（纯函数）：各杀法「打到将」的时刻表统一在这里，
+ * 高亮层按它给将加抖动——与动作层的爆点共用同一组时刻，保证声画同拍
+ */
+function actorShake(info, p) {
+  var key = info.key;
+  var beats;
+  if (KNIGHT_KEYS[key]) beats = [0.88];
+  else if (key === 'shuangchecuo') {
+    beats = [];
+    for (var i = 0; i < info.pieces.length; i++) beats.push(i * 0.22 + 0.30);
+  } else if (key === 'mahoupao' || key === 'mengong' || key === 'mensha' ||
+             key === 'chongpao' || key === 'tiandipao' || key === 'jiachepao') {
+    beats = cannonHits(info);
+  } else {
+    return 0;
+  }
+  var shakeQ = 0;
+  for (var j = 0; j < beats.length; j++) {
+    var q = clamp01((p - beats[j]) / 0.30);
+    if (q > shakeQ && q < 1) shakeQ = q;
+  }
+  return shakeQ;
+}
+
+/**
+ * 动作层调度（纯函数）：算出高亮层要让位的演员（跃迁的马/冲锋的车）
+ * @returns {{hide:Object}}
+ */
+function actorsPlan(info, p) {
+  var plan = { hide: {} };
+  if (!info || p <= 0) return plan;
+  var key = info.key;
+
+  if (KNIGHT_KEYS[key]) {
+    if (p > 0.02 && p < 0.97) plan.hide[info.checker] = true;
+    return plan;
+  }
+  if (key === 'shuangchecuo') {
+    for (var i = 0; i < info.pieces.length; i++) {
+      var q = clamp01((p - i * 0.22) / 0.6);
+      if (q > 0.02 && q < 0.98) plan.hide[info.pieces[i]] = true;
+    }
+  }
+  return plan;
+}
+
+/** 动作层绘制（在高亮与母题之后） */
+function paintActors(ctx, L, board, info, p) {
+  if (!info || p <= 0) return;
+  var key = info.key;
+  if (KNIGHT_KEYS[key]) { knightActors(ctx, L, info, p, board); return; }
+  if (key === 'shuangchecuo') { rookActors(ctx, L, info, p, board); return; }
+
+  var cannons = null;
+  var glow = null;
+  if (key === 'mahoupao' || key === 'mengong' || key === 'mensha') {
+    cannons = [info.checker];
+    glow = info.screen;
+  } else if (key === 'chongpao') {
+    cannons = [info.checker, info.screen];
+    glow = info.screen;
+  } else if (key === 'tiandipao' || key === 'jiachepao') {
+    cannons = (info.pieces || []).slice(0, 2);
+  }
+  if (cannons && cannons.length) cannonActors(ctx, L, info, p, cannons, glow);
 }
 
 // ---------------------------------------------------------------------------

@@ -326,7 +326,8 @@ function searchRoot(pos, depth, exact, ctx) {
   stack.length = start;
   ctx.bestAtPly[0] = bestMove;
 
-  moves.sort(function (a, b) { return b.score - a.score; });
+  // 同分时按走法编码定序，保证确定性模式与分片搜索（createSearch）的择路一致
+  moves.sort(function (a, b) { return b.score - a.score || a.move - b.move; });
   return { scored: moves, bestScore: best, bestMove: bestMove };
 }
 
@@ -533,12 +534,293 @@ function evaluatePosition(pos) {
   return EV.evaluate(pos);
 }
 
+// ---------------------------------------------------------------------------
+// 可分片搜索：把迭代加深拆成「每次一个根走法」的小步，片间让出主线程
+// ---------------------------------------------------------------------------
+
+/**
+ * 创建可分片搜索（解决高难度同步搜索冻屏的问题）
+ *
+ * 与 findBestMove 同一套迭代加深 + Alpha-Beta，区别只在调度：
+ * 每次 step(budgetMs) 只在时间预算内推进若干个根走法，到点就停，下一帧
+ * 接着搜——UI 因此始终能渲染「思考中」，不再整段卡死。
+ *
+ * 单个根走法在片内搜不完时，沿用上一层迭代给出的分值（没有就垫底），
+ * 保证每个深度都必然能收尾：宁可这一手估得粗一点，也不让某一步走法
+ * 把整个切片拖死。层间停止条件（杀棋 / 总时限 / 最大深度）与
+ * findBestMove 完全一致；开局库、失误随机、开局变化阶段的语义也一致。
+ *
+ * 搜索期间 pos 通过 make/unmake 保持平衡，片与片之间始终停在根局面，
+ * 主线程可以安全地继续渲染同一个 pos。
+ *
+ * @param {Position} pos 局面（side 即需要走子的一方）
+ * @param {object} [options] 同 findBestMove（level/moveNumber/deterministic/depth/useBook）
+ * @returns {{step:function(number=):boolean, cancel:function(),
+ *            isDone:function():boolean, getResult:function():?object, state:object}}
+ *          step 返回 true 表示搜索结束（getResult 取结果，形状同 findBestMove）；
+ *          cancel 后 step 立即结束且 getResult 为 null
+ */
+function createSearch(pos, options) {
+  options = options || {};
+  var level = LEVELS[options.level] || LEVELS.normal;
+  var deterministic = !!options.deterministic;
+  var maxDepth = options.depth || level.depth;
+  var startTime = Date.now();
+  var totalDeadline = deterministic ? Infinity : startTime + Math.max(100, level.time);
+  var ctx = createContext();
+  resetContext(ctx, totalDeadline);
+
+  var allMoves = MG.genLegalMoves(pos, pos.side);
+
+  var st = {
+    done: false,
+    cancelled: false,
+    result: null,
+    phase: 'main',           // 'main' | 'variety' | 'varietyRun'
+    depth: 0,                // 当前阶段正在迭代的深度
+    completedDepth: 0,
+    rootMoves: null,         // 当前阶段的根走法（已排序）
+    rootExact: false,
+    curIndex: 0,
+    curScored: null,
+    curAlpha: -INF,
+    prevScored: null,        // 上一完成阶段的 [{move,score}]（降序）
+    bestMove: 0,
+    bestScore: 0,
+    varietyUsed: false,
+    abortedRootMoves: 0      // 诊断用：有多少根走法因片内超时而沿用旧分值
+  };
+
+  function finish(result) { st.done = true; st.result = result; }
+
+  // 与 findBestMove 相同的即时分支：无走法 / 失误随机 / 开局库
+  if (allMoves.length === 0) {
+    finish(null);
+  } else if (!deterministic && level.blunder > 0 && Math.random() < level.blunder) {
+    var randomMove = allMoves[(Math.random() * allMoves.length) | 0];
+    finish({
+      move: randomMove, from: MG.moveFrom(randomMove), to: MG.moveTo(randomMove),
+      score: 0, depth: 0, nodes: 0, time: Date.now() - startTime, mateIn: 0, blunder: true
+    });
+  } else if (!deterministic && level.useBook !== false && options.useBook !== false) {
+    var bookMove = BOOK.getBookMove(pos);
+    if (bookMove !== null && allMoves.indexOf(bookMove) >= 0) {
+      finish({
+        move: bookMove, from: MG.moveFrom(bookMove), to: MG.moveTo(bookMove),
+        score: 0, depth: 0, nodes: 0, time: Date.now() - startTime,
+        mateIn: 0, blunder: false, book: true
+      });
+    }
+  }
+
+  function mateFound() {
+    return st.completedDepth >= 1 &&
+      (st.bestScore > MATE - 1000 || st.bestScore < -MATE + 1000);
+  }
+
+  /** 开一个迭代层：生成根走法，有上一层分值时按其降序重排（好棋先搜剪枝多） */
+  function beginPhase(depth, exact) {
+    var stack = ctx.moveStack;
+    var start = MG.genLegalMovesInPlace(pos, pos.side, stack, false, ctx.filterUndo);
+    var end = stack.length;
+    orderMoves(pos, ctx, start, end, 0, ORDER_K);
+    var moves = [];
+    var i;
+    for (i = start; i < end; i++) moves.push(stack[i]);
+    stack.length = start;
+
+    if (st.prevScored) {
+      var scoreOf = {};
+      for (i = 0; i < st.prevScored.length; i++) scoreOf[st.prevScored[i].move] = st.prevScored[i].score;
+      moves.sort(function (a, b) {
+        var sa = scoreOf[a] === undefined ? -INF : scoreOf[a];
+        var sb = scoreOf[b] === undefined ? -INF : scoreOf[b];
+        return sb - sa || a - b;
+      });
+    }
+
+    st.rootMoves = moves;
+    st.rootExact = exact;
+    st.curIndex = 0;
+    st.curScored = [];
+    st.curAlpha = -INF;
+    st.depth = depth;
+  }
+
+  /** 片内没搜完的根走法：沿用上一层分值，没有就按原顺序垫底 */
+  function inheritedScore(move, index) {
+    if (st.prevScored) {
+      for (var i = 0; i < st.prevScored.length; i++) {
+        if (st.prevScored[i].move === move) return st.prevScored[i].score;
+      }
+    }
+    return -INF + index;
+  }
+
+  /** 搜索一个根走法；返回 false 表示本层已全部搜完 */
+  function stepOne(sliceDeadline) {
+    if (st.curIndex >= st.rootMoves.length) return false;
+    var move = st.rootMoves[st.curIndex];
+    var undo = ctx.undoPool[0];
+
+    ctx.deadline = Math.min(sliceDeadline, totalDeadline);
+    ctx.aborted = false;
+
+    pos.makeMove(MG.moveFrom(move), MG.moveTo(move), undo);
+    var windowAlpha = st.rootExact ? -INF : st.curAlpha;
+    var score = -negamax(pos, st.depth - 1, -INF, -windowAlpha, 1, ctx);
+    pos.unmakeMove(undo);
+
+    if (ctx.aborted) {
+      score = inheritedScore(move, st.curIndex);
+      st.abortedRootMoves++;
+    } else if (!st.rootExact && score > st.curAlpha) {
+      st.curAlpha = score;
+    }
+
+    st.curScored.push({ move: move, score: score });
+    st.curIndex++;
+    return true;
+  }
+
+  /** 收一个迭代层：排序、更新最优、供下一层排序与超时继承使用 */
+  function finishPhase() {
+    if (!st.curScored || !st.curScored.length) { st.rootMoves = null; return false; }
+    st.curScored.sort(function (a, b) { return b.score - a.score || a.move - b.move; });
+    st.prevScored = st.curScored;
+    st.bestMove = st.curScored[0].move;
+    st.bestScore = st.curScored[0].score;
+    ctx.bestAtPly[0] = st.bestMove;
+    if (st.phase === 'main') st.completedDepth = st.depth;
+    st.rootMoves = null;
+    return true;
+  }
+
+  /** 主迭代结束：决定是否追加开局变化阶段（与 findBestMove 同条件） */
+  function enterVarietyOrFinish() {
+    var want = !deterministic && !level.exact && !mateFound() && level.topN <= 1 &&
+      st.completedDepth >= 1 &&
+      (options.moveNumber === undefined || options.moveNumber <= OPENING_VARIETY_MOVES);
+    if (want) st.phase = 'variety';
+    else finalize();
+  }
+
+  function finalize() {
+    var scored = st.prevScored;
+    if (!scored || !scored.length) {
+      var fallback = allMoves[0];
+      finish({
+        move: fallback, from: MG.moveFrom(fallback), to: MG.moveTo(fallback),
+        score: 0, depth: 0, nodes: ctx.nodes, time: Date.now() - startTime,
+        mateIn: 0, blunder: false
+      });
+      return;
+    }
+
+    var bestScore = st.bestScore;
+    var mf = bestScore > MATE - 1000 || bestScore < -MATE + 1000;
+    var topN = st.varietyUsed ? level.openingTopN : level.topN;
+    var spread = st.varietyUsed ? level.openingSpread : level.spread;
+    var chosen = deterministic ? scored[0].move : pickMove(scored, topN, spread, level.noise, mf);
+
+    var mateIn = 0;
+    if (bestScore > MATE - 1000) mateIn = Math.ceil((MATE - bestScore) / 2);
+    else if (bestScore < -MATE + 1000) mateIn = -Math.ceil((bestScore + MATE) / 2);
+
+    finish({
+      move: chosen,
+      from: MG.moveFrom(chosen),
+      to: MG.moveTo(chosen),
+      score: bestScore,
+      depth: st.completedDepth,
+      nodes: ctx.nodes,
+      time: Date.now() - startTime,
+      mateIn: mateIn,
+      blunder: false,
+      book: false
+    });
+  }
+
+  /** 推进一步：开一个迭代层 / 搜一个根走法 / 收一个迭代层 */
+  function pumpOnce(sliceDeadline) {
+    if (st.rootMoves) {
+      if (stepOne(sliceDeadline)) return;
+      finishPhase();
+      if (st.phase === 'main') {
+        if (mateFound() || st.completedDepth >= maxDepth || Date.now() >= totalDeadline) {
+          enterVarietyOrFinish();
+        }
+      } else {
+        // 开局变化阶段收尾：候选集已换成浅层精确分值那一份
+        st.varietyUsed = true;
+        finalize();
+      }
+      return;
+    }
+
+    if (st.phase === 'main') {
+      if (st.completedDepth >= 1 &&
+          (st.completedDepth >= maxDepth || Date.now() >= totalDeadline || mateFound())) {
+        enterVarietyOrFinish();
+        return;
+      }
+      beginPhase(st.completedDepth + 1, !!level.exact);
+      if (!st.rootMoves.length) { st.rootMoves = null; finalize(); }
+      return;
+    }
+    if (st.phase === 'variety') {
+      beginPhase(Math.min(OPENING_VARIETY_DEPTH, Math.max(1, st.completedDepth)), true);
+      st.phase = 'varietyRun';
+      return;
+    }
+    finalize(); // 兜底：异常阶段直接出结果，绝不空转
+  }
+
+  /**
+   * 推进搜索，最多占用 budgetMs 毫秒（默认 12）
+   * @returns {boolean} true 表示搜索结束（含被取消）
+   */
+  function step(budgetMs) {
+    if (st.done) return true;
+    var sliceDeadline = Date.now() + Math.max(1, budgetMs === undefined ? 12 : budgetMs);
+    var guard = 0;
+    while (!st.done) {
+      if (st.cancelled) { st.done = true; st.result = null; break; }
+      if (Date.now() >= sliceDeadline) break;
+      pumpOnce(sliceDeadline);
+      // 防御性熔断：任何意外空转都不能拖死主线程
+      if (++guard > 1000000) { finalize(); break; }
+    }
+    return st.done;
+  }
+
+  return {
+    step: step,
+    cancel: function () { st.cancelled = true; },
+    isDone: function () { return st.done; },
+    getResult: function () { return st.result; },
+    state: st
+  };
+}
+
+/**
+ * 驱动分片搜索直到完成（同步语义，供测试与离线分析使用）
+ * @param {number} [sliceMs=50] 每片预算；越小越能检验片间续搜路径
+ */
+function runSearch(pos, options, sliceMs) {
+  var s = createSearch(pos, options);
+  while (!s.step(sliceMs === undefined ? 50 : sliceMs)) {}
+  return s.getResult();
+}
+
 module.exports = {
   LEVELS: LEVELS,
   LEVEL_ORDER: LEVEL_ORDER,
   MATE: MATE,
   INF: INF,
   findBestMove: findBestMove,
+  createSearch: createSearch,
+  runSearch: runSearch,
   getHint: getHint,
   analyzeMoves: analyzeMoves,
   evaluatePosition: evaluatePosition,

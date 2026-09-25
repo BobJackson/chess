@@ -205,7 +205,7 @@ function drawRiver(ctx, L) {
 /**
  * 在任意屏幕坐标画一枚棋子（拖拽时位置不再是交叉点）
  * @param {number} piece 棋子编码（正红负黑）
- * @param {object} [opts] { scale, dim, alpha }
+ * @param {object} [opts] { scale, dim, alpha, rotate（弧度，绕棋子中心） }
  */
 function drawPieceAt(ctx, L, x, y, piece, opts) {
   opts = opts || {};
@@ -213,6 +213,13 @@ function drawPieceAt(ctx, L, x, y, piece, opts) {
   var isRed = piece > 0;
 
   ctx.save();
+  // 击飞旋转：把坐标系搬到棋子中心，后续全部按原点绘制
+  if (opts.rotate) {
+    ctx.translate(x, y);
+    ctx.rotate(opts.rotate);
+    x = 0;
+    y = 0;
+  }
   if (opts.dim) ctx.globalAlpha = 0.55;
   else if (typeof opts.alpha === 'number') {
     ctx.globalAlpha = Math.max(0, Math.min(1, opts.alpha));
@@ -273,8 +280,11 @@ function easeInOutCubic(t) {
  * 画走子动画中「正在移动的那枚棋子」
  *
  * 对局状态在走子瞬间就已更新，终点格上已有棋子；动画期间渲染层跳过终点格，
- * 改由本函数按进度把棋子从起点插值滑向终点，并在中段微微抬起（缩放），
- * 落定时缩放回到 1，与终点格上的棋子无缝衔接。
+ * 改由本函数按进度把棋子从起点插值滑向终点。
+ *
+ * 不是直线平移：中段沿法向抬起一道小抛物线（先拎起来、再放下去），
+ * 配合缩放与投影，落定时与终点格上的棋子无缝衔接——这一道弧线是
+ * 「手感」的主要来源，匀速直线滑动看起来像幻灯片。
  *
  * @param {object} anim { from, to, piece, t }，t 为 0~1 的线性进度
  */
@@ -285,8 +295,41 @@ function drawMoveAnim(ctx, L, anim) {
   var x1 = L.xOf(anim.to);
   var y1 = L.yOf(anim.to);
 
-  drawPieceAt(ctx, L, x0 + (x1 - x0) * e, y0 + (y1 - y0) * e, anim.piece, {
+  // 抛物线抬升：长距离（炮/车）抬得稍高，但封顶，别让棋子飞出棋盘戏太多
+  var dist = Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+  var lift = Math.min(L.cell * 0.34, dist * 0.16) * Math.sin(Math.PI * anim.t);
+
+  drawPieceAt(ctx, L, x0 + (x1 - x0) * e, y0 + (y1 - y0) * e - lift, anim.piece, {
     scale: 1 + 0.14 * Math.sin(Math.PI * anim.t)
+  });
+}
+
+/**
+ * 画「被吃的那枚棋子」：不是原地淡出——沿走子方向被击飞出去，
+ * 边飞边旋转边变淡，200ms 内完成一记「打击」
+ *
+ * @param {object} anim { from, to, captured, t }
+ */
+function drawCapturedFlyoff(ctx, L, anim) {
+  var x1 = L.xOf(anim.to);
+  var y1 = L.yOf(anim.to);
+  var dx = x1 - L.xOf(anim.from);
+  var dy = y1 - L.yOf(anim.from);
+  var dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist <= 0) { dx = 1; dy = 0; dist = 1; }
+  dx /= dist; dy /= dist;
+
+  // easeIn：先顿一下再被顶飞，像被落下来的棋子「磕」出去
+  var e = anim.t * anim.t;
+  var fly = L.cell * 1.05 * e;
+  var hop = L.cell * 0.16 * Math.sin(Math.PI * Math.min(1, anim.t * 1.15));
+  // 自旋方向与击飞方向关联，确定性（不吃随机源，测试可复现）
+  var spin = (dx + dy >= 0 ? 1 : -1) * 1.35 * e;
+
+  drawPieceAt(ctx, L, x1 + dx * fly, y1 + dy * fly - hop, anim.captured, {
+    alpha: 1 - anim.t,
+    scale: 1 - 0.10 * anim.t,
+    rotate: spin
   });
 }
 
@@ -310,12 +353,9 @@ function drawPieces(ctx, L, board, moving, anim) {
   }
 
   if (anim) {
-    // 被吃的棋子留在终点格淡出，被落下的棋子覆盖后消失
+    // 被吃的棋子沿走子方向击飞（带自旋），不再是原地淡出
     if (anim.captured !== C.EMPTY && anim.captured !== undefined) {
-      drawPiece(ctx, L, anim.to, anim.captured, {
-        alpha: 1 - anim.t,
-        scale: 1 - 0.18 * anim.t
-      });
+      drawCapturedFlyoff(ctx, L, anim);
     }
     drawMoveAnim(ctx, L, anim);
   }

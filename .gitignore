@@ -19,3 +19,6 @@ project.private.config.json
 .idea/
 .vscode/
 *.swp
+
+# WorkBuddy 本地工作区数据
+.workbuddy/

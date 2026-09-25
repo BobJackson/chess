@@ -22,6 +22,7 @@ function assert(name, actual, expected) {
     console.log('  \x1b[31mFAIL\x1b[0m  ' + name + ' 期望 ' + expected + '，实际 ' + actual);
   }
 }
+function truthy(name, actual) { assert(name, !!actual, true); }
 
 function describeMove(move) {
   var from = MG.moveFrom(move);
@@ -244,6 +245,92 @@ console.log('\n[8] 开局变化与中局确定性');
   var rb = AI.findBestMove(pos, optA);
   assert('真实中局确定性着法可复现', ra.move, rb.move);
   assert('真实中局确定性分值可复现', ra.score, rb.score);
+})();
+
+console.log('\n[9] 分片搜索：与同步搜索确定性一致');
+(function () {
+  var spots = [
+    { name: '初始局面', make: function () { return new Position(); } },
+    { name: '白吃车战术', make: function () { return new Position('3k5/9/4r4/9/9/4R4/9/9/9/4K4 w - - 0 1'); } },
+    // 中局局面：从初始局面走四手得到，不凭空写 FEN
+    { name: '中局', make: function () {
+      var p = new Position();
+      var uu = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
+      [[54, 45], [31, 40], [64, 63], [19, 28]].forEach(function (mv) { p.makeMove(mv[0], mv[1], uu); });
+      return p;
+    } }
+  ];
+
+  // exact 难度（简单，全窗口）：确定性模式下分片与同步必须逐分一致
+  var exactOk = true;
+  var exactScoreOk = true;
+  spots.forEach(function (s) {
+    var opt = { level: 'easy', moveNumber: 999, useBook: false, deterministic: true };
+    var a = AI.findBestMove(s.make(), opt);
+    var b = AI.runSearch(s.make(), opt);
+    if (!b || a.move !== b.move) exactOk = false;
+    if (!b || a.score !== b.score) exactScoreOk = false;
+  });
+  assert('exact 难度分片/同步走法一致', exactOk, true);
+  assert('exact 难度分片/同步分值一致', exactScoreOk, true);
+
+  // 非 exact 难度（困难，带窗口）：最优走法必须一致
+  var hardOk = true;
+  spots.forEach(function (s) {
+    var opt = { level: 'hard', moveNumber: 999, useBook: false, deterministic: true, depth: 4 };
+    var a = AI.findBestMove(s.make(), opt);
+    var b = AI.runSearch(s.make(), opt, 50);
+    if (!b || a.move !== b.move) hardOk = false;
+  });
+  assert('困难难度分片/同步走法一致', hardOk, true);
+
+  // 一步杀：分片搜索同样直接报杀
+  var mateOpt = { level: 'hard', moveNumber: 999, useBook: false, deterministic: true, depth: 4 };
+  var matePos = new Position('4k4/3R5/9/9/9/8R/9/9/9/3K5 w - - 0 1');
+  var mr = AI.runSearch(matePos, mateOpt);
+  assert('分片搜索识别一步致胜', mr.mateIn, 1);
+})();
+
+console.log('\n[10] 分片搜索：小切片续搜、时限与取消');
+(function () {
+  // 1ms 小切片：强制走片间续搜路径，必须收敛且走法合法
+  var pos = new Position();
+  var s = AI.createSearch(pos, { level: 'hard', moveNumber: 999, useBook: false, deterministic: true, depth: 4 });
+  var slices = 0;
+  while (!s.step(1)) { slices++; if (slices > 100000) break; }
+  var r = s.getResult();
+  truthy('1ms 切片收敛出结果', !!r);
+  truthy('1ms 切片确实分多片完成', slices > 0);
+  truthy('小切片结果走法合法', r && MG.genLegalMoves(pos, pos.side).indexOf(r.move) >= 0);
+
+  // 大师档（非确定性）：总时限内必须出结果，不能让切片拖死
+  var s2 = AI.createSearch(new Position(), { level: 'master', moveNumber: 999, useBook: false });
+  var t0 = Date.now();
+  while (!s2.step(12)) { if (Date.now() - t0 > 8000) break; }
+  var r2 = s2.getResult();
+  truthy('大师档在时限内出结果', !!r2);
+  truthy('大师档至少完成一层', r2 && r2.depth >= 1);
+
+  // 取消：cancel 后 step 立即结束且结果为 null
+  var s3 = AI.createSearch(new Position(), { level: 'master', moveNumber: 999, useBook: false });
+  s3.cancel();
+  assert('取消后 step 立即完成', s3.step(12), true);
+  assert('取消后结果为 null', s3.getResult(), null);
+
+  // 开局库：初始局面第一步就出结果，无需迭代
+  var s4 = AI.createSearch(new Position(), { level: 'normal', moveNumber: 0 });
+  assert('开局库第一步即完成', s4.step(12), true);
+  truthy('开局库命中标记', s4.getResult() && s4.getResult().book === true);
+
+  // 无子可动（已被将死）的局面：结果为 null 而不是死循环
+  var mp = new Position('4k4/3R5/9/9/9/8R/9/9/9/3K5 w - - 0 1');
+  var win = AI.findBestMove(mp, { level: 'hard', moveNumber: 999, useBook: false, deterministic: true, depth: 2 });
+  var uw = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
+  mp.makeMove(win.from, win.to, uw);
+  assert('构造出黑方无子可动', MG.genLegalMoves(mp, C.BLACK).length, 0);
+  var sm = AI.createSearch(mp, { level: 'easy' });
+  assert('无子可动第一步即完成', sm.step(12), true);
+  assert('无子可动结果为 null', sm.getResult(), null);
 })();
 
 console.log('\n----------------------------------------');

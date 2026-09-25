@@ -230,6 +230,110 @@ console.log('\n[4] 母题的分支差异');
 })();
 
 // ---------------------------------------------------------------------------
+console.log('\n[4.5] 动作层：炮弹 / 马跃 / 车冲 / 将震颤');
+(function () {
+  function caseOf(key) {
+    return CASES.filter(function (c) { return c.key === key; })[0];
+  }
+  /** 按演示进度 p（0~1）取一帧 */
+  function drawAtP(eg, p) {
+    return drawAt(eg, T.DIM + p * (T.SHOW - T.DIM));
+  }
+  function startOf(key) {
+    var r = resultOf(caseOf(key).fen);
+    var eg = new Endgame();
+    eg.start(r.result, { board: r.pos.board, layout: L, win: true });
+    return { eg: eg, r: r, info: r.result.mateInfo };
+  }
+  /** 距 (x,y) tol 内的 arc 数 */
+  function arcsNear(ctx, x, y, tol) {
+    return ctx.calls.arc.filter(function (a) {
+      return Math.abs(a[0] - x) < tol && Math.abs(a[1] - y) < tol;
+    }).length;
+  }
+  /** 指定文字的 fillText 记录 */
+  function textsOf(ctx, ch) {
+    return ctx.calls.fillText.filter(function (t) { return t[0] === ch; });
+  }
+
+  // —— 炮系：火球沿将军线飞行 ——
+  var m = startOf('mahoupao');
+  var a = L.pointOf(m.info.checker);
+  var b = L.pointOf(m.info.king);
+  var ctxF = drawAtP(m.eg, 0.4);
+  // p=0.4 → q=0.714 → fly≈0.651，火球应在炮与将之间 65% 处
+  var fly = (0.4 / 0.56 - 0.18) / 0.82;
+  var shellX = a.x + (b.x - a.x) * fly;
+  var shellY = a.y + (b.y - a.y) * fly;
+  truthy('马后炮 · 火球飞在炮与将之间', arcsNear(ctxF, shellX, shellY, L.cell * 0.45) >= 1);
+
+  // —— 命中爆点：命中窗内将附近 arc 明显增多 ——
+  var early = drawAtP(m.eg, 0.3);
+  var hit = drawAtP(m.eg, 0.7);
+  var nEarly = arcsNear(early, b.x, b.y, L.cell * 1.0);
+  var nHit = arcsNear(hit, b.x, b.y, L.cell * 1.0);
+  truthy('马后炮 · 命中窗将附近爆点增多（' + nEarly + '→' + nHit + '）', nHit > nEarly);
+
+  // —— 将震颤：命中窗内将偏离格心，窗外回正 ——
+  var kingChar = null;
+  ['將', '帥'].forEach(function (ch) {
+    if (textsOf(hit, ch).length) kingChar = ch;
+  });
+  truthy('找到被将的将', kingChar !== null);
+  var tHit = textsOf(hit, kingChar).filter(function (t) {
+    return Math.abs(t[2] - b.y) < L.cell * 0.5;
+  });
+  truthy('命中窗将偏离格心（震颤）', tHit.length > 0 && Math.abs(tHit[0][1] - b.x) > 0.5);
+  var calmCtx = drawAtP(m.eg, 0.3);
+  var tCalm = textsOf(calmCtx, kingChar).filter(function (t) {
+    return Math.abs(t[2] - b.y) < L.cell * 0.5;
+  });
+  approx('未命中时将端坐在格心', tCalm.length ? Math.abs(tCalm[0][1] - b.x) : 99, 0, 0.01);
+
+  // —— 重炮：两发炮弹错拍，一发炸一发飞 ——
+  var c2 = startOf('chongpao');
+  var ctxC = drawAtP(c2.eg, 0.6);
+  var ck = L.pointOf(c2.info.king);
+  truthy('重炮 · 第一发已炸（将旁爆点）', arcsNear(ctxC, ck.x, ck.y, L.cell * 1.0) >= 1);
+  // 第二发 q=0.786 fly≈0.738，从后炮（screen）飞出
+  var back = L.pointOf(c2.info.screen);
+  var fly2 = ((0.6 - 0.16) / 0.56 - 0.18) / 0.82;
+  truthy('重炮 · 第二发飞行中', arcsNear(ctxC,
+    back.x + (ck.x - back.x) * fly2, back.y + (ck.y - back.y) * fly2, L.cell * 0.45) >= 1);
+
+  // —— 马系：跃迁中原位无马、残影+本体多匹 ——
+  var kn = startOf('wocaoma');
+  var checker = kn.info.checker;
+  var ctxK = drawAtP(kn.eg, 0.5);
+  var horses = textsOf(ctxK, '傌');
+  truthy('卧槽马 · 残影与本体多于一匹', horses.length >= 2);
+  var atHome = horses.filter(function (t) {
+    return Math.abs(t[1] - L.xOf(checker)) < 0.01 && Math.abs(t[2] - L.yOf(checker)) < L.pieceRadius * 0.12;
+  });
+  assert('卧槽马 · 跃迁中原位无马', atHome.length, 0);
+  var ctxK0 = drawAtP(kn.eg, 0);
+  var home0 = textsOf(ctxK0, '傌').filter(function (t) {
+    return Math.abs(t[1] - L.xOf(checker)) < 0.01;
+  });
+  assert('卧槽马 · 起播时马在原位', home0.length, 1);
+
+  // —— 车系：冲锋中车离原格、速度线让笔画增多 ——
+  var rk = startOf('shuangchecuo');
+  var ctxR = drawAtP(rk.eg, 0.35);
+  var rooks = textsOf(ctxR, '車');
+  var homeCount = rooks.filter(function (t) {
+    return rk.info.pieces.some(function (idx) {
+      return Math.abs(t[1] - L.xOf(idx)) < 0.01 && Math.abs(t[2] - L.yOf(idx)) < L.pieceRadius * 0.12;
+    });
+  }).length;
+  assert('双车错 · 冲锋中车都不在原格', homeCount, 0);
+  var stillCtx = drawAtP(rk.eg, 1.0);
+  truthy('双车错 · 冲锋速度线让笔画多于静止帧（' +
+    ctxR.calls.lineTo.length + ' vs ' + stillCtx.calls.lineTo.length + '）',
+    ctxR.calls.lineTo.length > stillCtx.calls.lineTo.length);
+})();
+
+// ---------------------------------------------------------------------------
 console.log('\n[5] 结算卡与按钮');
 (function () {
   var r = resultOf(CASES[0].fen);

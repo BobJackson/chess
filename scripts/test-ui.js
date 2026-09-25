@@ -78,6 +78,9 @@ function createStubContext() {
     fill: function () { calls.fill++; },
     save: function () { calls.save++; },
     restore: function () { calls.restore++; },
+    translate: function () {},
+    rotate: function () {},
+    scale: function () {},
     fillText: function (t, x, y) {
       calls.fillText.push([t, x, y]);
       calls.fonts.push(ctx.font);
@@ -583,17 +586,23 @@ console.log('\n[14] 走子动画：正在移动的那枚棋子');
   var texts = pieceTexts(ctx.calls);
   assert('动画期间棋子总数不变', texts.length, 32);
 
-  // 缓动中点即几何中点，故棋子应正好落在起终点的中间
+  // 缓动中点即几何中点，但走子是抛物线：中段沿法向抬起
+  // lift = min(cell*0.34, dist*0.16) * sin(π·t)，t=0.5 时达到峰值
+  var distPx = Math.sqrt(
+    Math.pow(L.xOf(to) - L.xOf(from), 2) + Math.pow(L.yOf(to) - L.yOf(from), 2));
+  var expectLift = Math.min(L.cell * 0.34, distPx * 0.16) * Math.sin(Math.PI * 0.5);
   var flying = texts.filter(function (t) {
-    return Math.abs(t[1] - midX) < 0.01 && Math.abs(t[2] - midY) < L.pieceRadius * 0.25;
+    // y 容差需吸收文字自身的 r*0.05 视觉偏移（drawPieceAt 文字基线）
+    return Math.abs(t[1] - midX) < 0.01 && Math.abs(t[2] - (midY - expectLift)) < L.pieceRadius * 0.12;
   });
-  assert('在途棋子画在起终点之间', flying.length, 1);
+  assert('在途棋子画在起终点之间（抛物线抬起）', flying.length, 1);
+  assert('抛物线抬升量大于零', expectLift > 0, true);
   assert('在途棋子文字为兵', flying[0][0], '兵');
   assert('终点格不再重复绘制',
     texts.filter(function (t) { return pieceAtSquare(t, L, to); }).length, 0);
 
-  // 14.2 中段抬起：棋子比落定状态更大
-  var midR = radiusAt(ctx.calls, midX, midY);
+  // 14.2 中段抬起：棋子比落定状态更大（弧心随抛物线在 midY - expectLift 处）
+  var midR = radiusAt(ctx.calls, midX, midY - expectLift);
   assert('在途棋子有外圈', typeof midR === 'number', true);
   assert('在途棋子被抬起（半径变大）', midR > L.pieceRadius, true);
 
@@ -609,7 +618,8 @@ console.log('\n[14] 走子动画：正在移动的那枚棋子');
     pieceTexts(ctx1.calls).filter(function (t) { return pieceAtSquare(t, L, to); }).length, 1);
   approx('落定时缩放回到 1', radiusAtSquare(ctx1.calls, L, to), L.pieceRadius);
 
-  // 14.4 吃子：被吃棋子在终点格淡出，且比静止时小
+  // 14.4 吃子：被吃棋子沿走子方向击飞（旋转 + 淡出），不再原地停留
+  // 旋转绘制时文字落在局部坐标 (0, ~0)（drawPieceAt 旋转分支把坐标系搬到棋子中心）
   var capCtx = createStubContext();
   R.draw(capCtx, L, {
     board: board,
@@ -617,17 +627,17 @@ console.log('\n[14] 走子动画：正在移动的那枚棋子');
   });
   var capTexts = pieceTexts(capCtx.calls);
   assert('吃子动画多出被吃的卒', capTexts.length, 33);
-  var dead = capTexts.filter(function (t) { return pieceAtSquare(t, L, to); });
-  assert('被吃棋子留在终点格', dead.length, 1);
-  assert('被吃棋子文字为卒', dead[0][0], '卒');
-  assert('被吃棋子缩小', radiusAtSquare(capCtx.calls, L, to) < L.pieceRadius, true);
+  assert('被吃棋子被击飞（不在终点格）',
+    capTexts.filter(function (t) { return pieceAtSquare(t, L, to); }).length, 0);
+  var dead = capTexts.filter(function (t) { return t[0] === '卒' && Math.abs(t[1]) < 0.01; });
+  assert('被吃卒仍在绘制（旋转坐标系原点）', dead.length, 1);
+  assert('被吃卒带缩小', radiusAt(capCtx.calls, 0, 0) < L.pieceRadius, true);
 
-  // 淡出用 globalAlpha 表现：被吃棋子的绘制透明度应小于 1
-  var idxs = pieceIndices(capCtx.calls);
+  // 淡出用 globalAlpha 表现：旋转绘制的被吃棋子（fillText 在原点）透明度应小于 1
   var deadAlpha = null;
-  for (var i = 0; i < idxs.length; i++) {
-    var t2 = capCtx.calls.fillText[idxs[i]];
-    if (pieceAtSquare(t2, L, to)) deadAlpha = capCtx.calls.alphas[idxs[i]];
+  for (var i = 0; i < capCtx.calls.fillText.length; i++) {
+    var t2 = capCtx.calls.fillText[i];
+    if (t2[0] === '卒' && Math.abs(t2[1]) < 0.01) deadAlpha = capCtx.calls.alphas[i];
   }
   approx('被吃棋子半透明', deadAlpha, 0.5);
 
