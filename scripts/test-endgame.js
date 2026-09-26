@@ -341,23 +341,24 @@ console.log('\n[5] 结算卡与按钮');
   var eg = new Endgame();
   eg.start(r.result, { board: r.pos.board, layout: L, win: true });
   var btns = eg.layoutButtons(W, H);
-  assert('人机/本地两个按钮', btns.map(function (b) { return b.id; }).join(','), 'again,menu');
+  assert('人机/本地三个按钮', btns.map(function (b) { return b.id; }).join(','), 'replay,again,menu');
   truthy('按钮落在卡片内', btns[0].x > eg.cardRect(W, H).x);
-  assert('两按钮不重叠', btns[1].x > btns[0].x + btns[0].w, true);
+  assert('相邻按钮不重叠', btns[1].x > btns[0].x + btns[0].w && btns[2].x > btns[1].x + btns[1].w, true);
 
   // 按钮未浮现时点按不算命中（只当作跳过）
   eg.t = T.SHOW;
   assert('未浮现时点按钮不算命中', eg.hitButtonAt(btns[0].x + 4, btns[0].y + 4), null);
   eg.t = T.END;
-  assert('浮现后命中「再来一局」', eg.hitButtonAt(btns[0].x + 4, btns[0].y + 4), 'again');
-  assert('浮现后命中「回菜单」', eg.hitButtonAt(btns[1].x + 4, btns[1].y + 4), 'menu');
+  assert('浮现后命中「复盘」', eg.hitButtonAt(btns[0].x + 4, btns[0].y + 4), 'replay');
+  assert('浮现后命中「再来一局」', eg.hitButtonAt(btns[1].x + 4, btns[1].y + 4), 'again');
+  assert('浮现后命中「回菜单」', eg.hitButtonAt(btns[2].x + 4, btns[2].y + 4), 'menu');
   assert('卡片外不算命中', eg.hitButtonAt(btns[0].x - 20, btns[0].y), null);
   assert('收起后不响应命中', (function () { eg.reset(); return eg.hitButtonAt(btns[0].x + 4, btns[0].y + 4); })(), null);
 
-  // 联机不可重开 -> 只给回菜单
+  // 联机不可重开 -> 复盘 + 回菜单
   var eg2 = new Endgame();
   eg2.start(r.result, { board: r.pos.board, layout: L, online: true });
-  assert('联机只有一个按钮', eg2.layoutButtons(W, H).map(function (b) { return b.id; }).join(','), 'menu');
+  assert('联机两个按钮', eg2.layoutButtons(W, H).map(function (b) { return b.id; }).join(','), 'replay,menu');
 
   // 胜负文案
   var eg3 = new Endgame();

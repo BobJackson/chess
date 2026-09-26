@@ -500,19 +500,19 @@ console.log('\n[8] 绝杀演出：替代系统弹窗 + 朗读杀法名');
   assert('返回菜单', manager.current.name, 'menu');
 })();
 
-console.log('\n[9] 联机终局只给「回菜单」');
+console.log('\n[9] 联机终局不给「再来一局」');
 (function () {
-  // 联机不能重开，演出就不该给「再来一局」这个按钮
+  // 联机不能重开，演出就不该给「再来一局」这个按钮；复盘两边都有
   var Endgame = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'endgame.js'));
   var eg = new Endgame();
   eg.start({ winner: 0, reason: '将死' }, { online: true });
   var ids = eg.layoutButtons(375, 700).map(function (x) { return x.id; });
-  assert('联机只有一个按钮', ids.join(','), 'menu');
+  assert('联机：复盘 + 回菜单', ids.join(','), 'replay,menu');
 
   var eg2 = new Endgame();
   eg2.start({ winner: 0, reason: '将死' }, { online: false });
   var ids2 = eg2.layoutButtons(375, 700).map(function (x) { return x.id; });
-  assert('人机/本地有两个按钮', ids2.join(','), 'again,menu');
+  assert('人机/本地：复盘 + 再来一局 + 回菜单', ids2.join(','), 'replay,again,menu');
 })();
 
 console.log('\n[10] 松桂账本：人对人记账与菜单展示');
@@ -633,6 +633,115 @@ console.log('\n[12] 菜单桂花粒子');
   truthy('菜单桂花飘落中', m.fx.count() > 0);
   pumpMs(4000);
   truthy('花瓣数量受上限约束', m.fx.count() <= 16);
+})();
+
+console.log('\n[13] 复盘：步进/回退/自动播放/绝杀重演');
+(function () {
+  var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+
+  /** 终局演出 → 跳过 → 点指定落款按钮 */
+  function endgameTap(b, id) {
+    b.endgame.skip();
+    pumpMs(16);
+    var btn = null;
+    b.endgame.buttons.forEach(function (x) { if (x.id === id) btn = x; });
+    truthy('演出有「' + id + '」按钮', btn);
+    tap(btn.x + btn.w / 2, btn.y + btn.h / 2);
+  }
+
+  // --- A. 多手普通局（认输终局，无杀法）---
+  var c = buttonCenter(manager.current, 'local');
+  tap(c.x, c.y);
+  assert('进入本地双人', manager.current.name, 'board');
+  var b = manager.current;
+
+  // 走四手经典开局：炮八平五 / 马8进7 / 马二进三 / 卒7进1
+  b.controller.requestMove(C.idxOf(1, 7), C.idxOf(4, 7));
+  b.controller.requestMove(C.idxOf(7, 0), C.idxOf(6, 2));
+  b.controller.requestMove(C.idxOf(1, 9), C.idxOf(2, 7));
+  b.controller.requestMove(C.idxOf(6, 3), C.idxOf(6, 4));
+  assert('四手棋已走', b.game.plyCount(), 4);
+  b.game.finish(C.RED, '认输');
+  b.showResult();
+
+  endgameTap(b, 'replay');
+  assert('进入复盘场景', manager.current.name, 'replay');
+  var r = manager.current;
+  assert('复盘初始在开局', r.ply, 0);
+  assert('复盘装载全部棋谱', r.moves.length, 4);
+  assert('开局状态文案', r.statusText, '共 4 手');
+  assert('中键初始为播放', r.toolbar[2].label, '播放');
+
+  // 单步前进：带动画，状态栏出着法
+  tap(centerOf(r.toolbar[3]).x, centerOf(r.toolbar[3]).y); // 下步
+  assert('前进一步', r.ply, 1);
+  assert('前进时播走子动画', r.controller.isAnimating(), true);
+  pumpMs(300);
+  assert('动画已落定', r.controller.isAnimating(), false);
+  truthy('状态栏出着法', r.statusText.indexOf('第 1/4 手 · 炮八平五') >= 0);
+
+  // 自动播放：到底自停
+  tap(centerOf(r.toolbar[2]).x, centerOf(r.toolbar[2]).y); // 播放
+  assert('自动播放中', r.playing, true);
+  assert('播放中键变暂停', r.toolbar[2].label, '暂停');
+  pumpMs(2000);
+  truthy('自动推进中（' + r.ply + ' 手）', r.ply >= 3);
+  pumpMs(3000);
+  assert('播到终局', r.ply, 4);
+  assert('到底自动停', r.playing, false);
+  assert('无杀法中键仍是播放', r.toolbar[2].label, '播放');
+
+  // 后退与跳回开局
+  tap(centerOf(r.toolbar[1]).x, centerOf(r.toolbar[1]).y); // 上步
+  assert('后退一步', r.ply, 3);
+  tap(centerOf(r.toolbar[0]).x, centerOf(r.toolbar[0]).y); // 开局
+  assert('跳回开局', r.ply, 0);
+  assert('上一步在边界无效', r.stepBack(), false);
+
+  // 棋盘不吃触摸：点棋盘不改变任何状态
+  var bp = r.layout.pointOf(C.idxOf(4, 7));
+  tap(r.boardX + bp.x, r.boardTop + bp.y);
+  assert('点棋盘不选中棋子', r.controller.selected, -1);
+  assert('点棋盘不改手数', r.ply, 0);
+
+  // 跳到终局（静默连放）
+  r.gotoEnd();
+  assert('跳到终局', r.ply, 4);
+  assert('跳终局不播动画', r.controller.isAnimating(), false);
+
+  tap(centerOf(r.toolbar[4]).x, centerOf(r.toolbar[4]).y); // 退出
+  assert('退出复盘回菜单', manager.current.name, 'menu');
+
+  // --- B. 绝杀局：终局后中键变「绝杀」，可重演演出 ---
+  var c2 = buttonCenter(manager.current, 'local');
+  tap(c2.x, c2.y);
+  var b2 = manager.current;
+  b2.game = new Game('3akN3/4a3C/9/9/9/5R3/9/9/9/5K3 w - - 0 1');
+  b2.controller.setGame(b2.game);
+  b2.resultShown = false;
+  b2.controller.requestMove(C.idxOf(8, 1), C.idxOf(8, 0)); // 炮二进一，马后炮
+  truthy('走出将死', b2.game.result);
+  pumpMs(600); // 落子动画播完才起演出
+  assert('演出已起', b2.endgame.isActive(), true);
+
+  endgameTap(b2, 'replay');
+  assert('绝杀局进入复盘', manager.current.name, 'replay');
+  var r2 = manager.current;
+  r2.gotoEnd();
+  assert('终局一手', r2.ply, 1);
+  assert('中键变为绝杀', r2.toolbar[2].label, '绝杀');
+
+  tap(centerOf(r2.toolbar[2]).x, centerOf(r2.toolbar[2]).y); // 绝杀
+  assert('重演绝杀演出', r2.endgame.isActive(), true);
+  pumpMs(100);
+  tap(app.w / 2, 40); // 未播完：点屏跳过
+  assert('点屏跳过演出', r2.endgame.isDone(), true);
+  tap(app.w / 2, 40); // 已播完：点屏收起
+  assert('演出已收起', r2.endgame.isActive(), false);
+
+  tap(centerOf(r2.toolbar[4]).x, centerOf(r2.toolbar[4]).y);
+  assert('收尾回菜单', manager.current.name, 'menu');
 })();
 
 console.log('\n----------------------------------------');

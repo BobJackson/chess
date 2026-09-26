@@ -2,7 +2,7 @@
  * 绝杀演出
  *
  * 替代原来的 wx.showModal 纯文字弹窗：终局时在棋盘上演一段「怎么杀的」，
- * 再落款给出杀法名与结果，最后浮出「再来一局 / 回菜单」两个按钮。
+ * 再落款给出杀法名与结果，最后浮出「复盘 / 再来一局 / 回菜单」按钮。
  *
  * 镜头化时间线（三拍 + 两处剪辑手法）：
  *   ① 压暗   棋盘蒙一层暗场，其余棋子沉下去
@@ -176,22 +176,26 @@ Endgame.prototype.cardRect = function (w, h) {
   return { x: (w - cw) / 2, y: (h - CARD_H) / 2, w: cw, h: CARD_H };
 };
 
-/** 布局按钮；联机不可重开，只给「回菜单」 */
+/** 布局按钮；必有「复盘」，联机不可重开则不给「再来一局」 */
 Endgame.prototype.layoutButtons = function (w, h) {
   var card = this.cardRect(w, h);
-  var gap = 12;
+  var gap = 10;
   var y = card.y + card.h - BTN_H - 18;
 
   if (this.online) {
-    var bw = card.w - 48;
-    this.buttons = [W.makeButton('menu', card.x + 24, y, bw, BTN_H, '回菜单', 'ghost')];
+    var bw = (card.w - 48 - gap) / 2;
+    this.buttons = [
+      W.makeButton('replay', card.x + 24, y, bw, BTN_H, '复盘', 'ghost'),
+      W.makeButton('menu', card.x + 24 + bw + gap, y, bw, BTN_H, '回菜单', 'ghost')
+    ];
     return this.buttons;
   }
 
-  var bw2 = (card.w - 48 - gap) / 2;
+  var bw2 = (card.w - 48 - gap * 2) / 3;
   this.buttons = [
-    W.makeButton('again', card.x + 24, y, bw2, BTN_H, '再来一局', 'primary'),
-    W.makeButton('menu', card.x + 24 + bw2 + gap, y, bw2, BTN_H, '回菜单', 'ghost')
+    W.makeButton('replay', card.x + 24, y, bw2, BTN_H, '复盘', 'ghost'),
+    W.makeButton('again', card.x + 24 + bw2 + gap, y, bw2, BTN_H, '再来一局', 'primary'),
+    W.makeButton('menu', card.x + 24 + (bw2 + gap) * 2, y, bw2, BTN_H, '回菜单', 'ghost')
   ];
   return this.buttons;
 };

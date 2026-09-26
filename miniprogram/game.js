@@ -14,6 +14,7 @@ var createMenu = require('./scenes/menu.js');
 var createBoard = require('./scenes/board.js');
 var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
+var createReplay = require('./scenes/replay.js');
 var audio = require('./ui/audio.js');
 var NET_CONFIG = require('./net/config.js');
 var Ledger = require('./core/ledger.js');
@@ -91,6 +92,7 @@ var app = {
     if (name === 'board') return createBoard(app);
     if (name === 'lobby') return createLobby(app);
     if (name === 'rules') return createRules(app);
+    if (name === 'replay') return createReplay(app);
     return null;
   }
 };
