@@ -42,7 +42,7 @@ miniprogram/
     chrome.js                屏幕级装饰（对局/复盘共享）：底色/棋桌面板/水印饰线
     themes.js                主题色板：松桂（默认）/ 紫金夜（深空紫金），就地切换 + 持久化
   audio/
-    bgm-songfeng.m4a         BGM《松风》：合成主题曲（gen-bgm.js，58.4s 无缝循环）
+    bgm-songfeng.m4a         BGM《松风》：Beneath the Mountain Pine 截取主歌段（54s 立体声无缝循环）
     bgm-guiyue.m4a           BGM《桂月》：实录氛围（修复循环版，38.7s 无缝循环）
     *.wav                    合成音效：落子/吃子/将军/胜/负/按钮/悔棋
   net/
