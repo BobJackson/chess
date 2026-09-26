@@ -229,7 +229,7 @@ console.log('\n[1] 入口与主菜单');
 (function () {
   truthy('app 上下文创建', app);
   assert('初始场景为菜单', manager.current.name, 'menu');
-  truthy('菜单按钮已布局', manager.current.buttons.length === 4);
+  truthy('菜单按钮已布局', manager.current.buttons.length === 5);
   pump(16);
   truthy('菜单已绘制', global.__canvas.ctx.calls.fillText.length > 0);
 
@@ -635,7 +635,127 @@ console.log('\n[12] 菜单桂花粒子');
   truthy('花瓣数量受上限约束', m.fx.count() <= 16);
 })();
 
-console.log('\n[13] 复盘：步进/回退/自动播放/绝杀重演');
+console.log('\n[13] 设置页：音乐/配乐/音效/先后手统一管理');
+(function () {
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+  var m = manager.current;
+  assert('当前在菜单', m.name, 'menu');
+  assert('菜单无音乐音效开关行', typeof m.toggles, 'undefined');
+
+  // 进入设置页（「系统设置」按钮在查看规则之下）
+  var gear = buttonCenter(m, 'settings');
+  truthy('菜单有系统设置入口', gear);
+  tap(gear.x, gear.y);
+  assert('进入设置页', manager.current.name, 'settings');
+  var s = manager.current;
+  assert('四行设置项', s.rows.length, 4);
+  assert('行序：音乐/配乐/音效/先后手',
+    s.rows.map(function (r) { return r.id; }).join(','), 'bgm,track,sfx,side');
+  pump(16);
+  truthy('设置页已绘制', global.__canvas.ctx.calls.fillText.indexOf('系统设置') >= 0);
+
+  function row(id) {
+    for (var i = 0; i < s.rows.length; i++) if (s.rows[i].id === id) return s.rows[i];
+    return null;
+  }
+  function tapSeg(r, frac) { tap(r.seg.x + r.seg.w * frac, r.seg.y + r.seg.h / 2); }
+
+  // 音乐开关：关 → 开
+  var bgmWasOn = app.audio.bgmOn;
+  tapSeg(row('bgm'), bgmWasOn ? 0.25 : 0.75); // 拨到相反档
+  assert('音乐开关已翻转', app.audio.bgmOn, !bgmWasOn);
+  tapSeg(row('bgm'), bgmWasOn ? 0.75 : 0.25); // 拨回
+  assert('音乐开关拨回', app.audio.bgmOn, bgmWasOn);
+
+  // 配乐切换：松风 ↔ 桂月（换 src 且持久化）
+  var t0 = app.audio.track;
+  tapSeg(row('track'), t0 === 0 ? 0.75 : 0.25);
+  assert('切曲生效', app.audio.track, 1 - t0);
+  assert('BGM 源已换', app.audio.bgm.src, app.audio.BGM_TRACKS[1 - t0].src);
+  tapSeg(row('track'), t0 === 0 ? 0.25 : 0.75);
+  assert('切回原曲', app.audio.track, t0);
+
+  // 音效开关
+  var sfxWasOn = app.audio.sfxOn;
+  tapSeg(row('sfx'), sfxWasOn ? 0.25 : 0.75);
+  assert('音效开关已翻转', app.audio.sfxOn, !sfxWasOn);
+  tapSeg(row('sfx'), sfxWasOn ? 0.75 : 0.25);
+
+  // 先后手：默认执红 → 让先执黑
+  assert('默认执红', app.humanSide, C.RED);
+  tapSeg(row('side'), 0.75);
+  assert('切到让先执黑', app.humanSide, C.BLACK);
+
+  // 返回菜单
+  tap(s.back.x + s.back.w / 2, s.back.y + s.back.h / 2);
+  assert('返回菜单', manager.current.name, 'menu');
+})();
+
+console.log('\n[14] 让先执黑：人机 AI 先手 + 本地账本按松的边记');
+(function () {
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+  assert('设置页选边已生效', app.humanSide, C.BLACK);
+
+  // --- 人机：执黑 = AI 执红先手，棋盘整盘翻转 ---
+  var c = buttonCenter(manager.current, 'ai');
+  tap(c.x, c.y);
+  assert('进入人机对局', manager.current.name, 'board');
+  var b = manager.current;
+  assert('人执黑', b.humanSide, C.BLACK);
+  assert('AI 执红', b.aiSide, C.RED);
+  assert('棋盘翻转为黑方视角', b.layout.flipped, true);
+  truthy('模式文案含执黑', b.modeLabel.indexOf('执黑') >= 0);
+  pumpMs(1500);
+  truthy('AI 自动先走一步', b.game.plyCount() >= 1);
+  assert('第一手是红方（AI）走的', b.game.history[0].side, C.RED);
+
+  // 执黑悔棋的边角：悔回开局后轮到 AI，必须重新调度（否则卡死无人走子）
+  while (b.game.plyCount() > 1) b.game.undo(1); // 收敛到只剩 AI 第一手
+  b.controller.reset();
+  var undoBtn = null;
+  b.toolbar.forEach(function (x) { if (x.id === 'undo') undoBtn = x; });
+  tap(undoBtn.x + undoBtn.w / 2, undoBtn.y + undoBtn.h / 2);
+  // 测试里 setTimeout 是同步桩：悔回开局 → 重新调度 → AI 已同步走回一手
+  assert('悔棋后 AI 立即重新执红先走', b.game.plyCount(), 1);
+  assert('重走的是红方（AI）', b.game.history[0].side, C.RED);
+  pumpMs(1500);
+  truthy('棋局继续未卡死', b.game.plyCount() >= 1);
+  var back = centerOf(b.toolbar[4]);
+  tap(back.x, back.y);
+  assert('返回菜单', manager.current.name, 'menu');
+
+  // --- 本地双人：松执黑，黑胜记松 ---
+  var c2 = buttonCenter(manager.current, 'local');
+  tap(c2.x, c2.y);
+  var lb = manager.current;
+  assert('本地双人松执黑', lb.humanSide, C.BLACK);
+  var before = app.ledger.summary();
+  lb.game.finish(C.BLACK, '将死'); // 黑胜 = 松胜
+  lb.showResult();
+  var after = app.ledger.summary();
+  assert('黑胜记入松', after.song, before.song + 1);
+  assert('桂不加分', after.gui, before.gui);
+  lb.endgame.skip();
+  pumpMs(16);
+  var menuBtn = null;
+  lb.endgame.buttons.forEach(function (x) { if (x.id === 'menu') menuBtn = x; });
+  tap(menuBtn.x + menuBtn.w / 2, menuBtn.y + menuBtn.h / 2);
+  assert('收尾回菜单', manager.current.name, 'menu');
+
+  // 还原默认：回设置页拨回执红，别污染后续启动的默认口径
+  var m2 = manager.current;
+  var gear2 = buttonCenter(m2, 'settings');
+  tap(gear2.x, gear2.y);
+  var s2 = manager.current;
+  var sideRow = null;
+  s2.rows.forEach(function (r) { if (r.id === 'side') sideRow = r; });
+  tap(sideRow.seg.x + sideRow.seg.w * 0.25, sideRow.seg.y + sideRow.seg.h / 2);
+  assert('拨回执红', app.humanSide, C.RED);
+  tap(s2.back.x + s2.back.w / 2, s2.back.y + s2.back.h / 2);
+  assert('回菜单收尾', manager.current.name, 'menu');
+})();
+
+console.log('\n[15] 复盘：步进/回退/自动播放/绝杀重演');
 (function () {
   var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
   var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));

@@ -92,7 +92,10 @@ function createBoardScene(app) {
     scene.shake = 0;
 
     scene.difficulty = app.difficulty;
-    scene.humanSide = scene.mode === 'online' ? scene.session.mySide : C.RED;
+    // 先后手：联机由房间分配；人机/本地用设置页的选择（默认执红，可让先执黑）
+    scene.humanSide = scene.mode === 'online'
+      ? scene.session.mySide
+      : (app.humanSide === C.BLACK ? C.BLACK : C.RED);
     scene.aiSide = 1 - scene.humanSide;
 
     scene.measure();
@@ -470,6 +473,9 @@ function createBoardScene(app) {
       scene.controller.reset();
       scene.afterAnim = null;
       scene.dirty = true; scene.refreshStatus();
+      // 人执黑（让先）时悔棋可能悔回开局——轮到 AI 就得重新调度，
+      // 否则棋盘会停在「轮到红方」却无人走子
+      if (scene.mode === 'ai' && scene.game.pos.side === scene.aiSide) scene.scheduleAi();
       return;
     }
     if (id === 'hint') {

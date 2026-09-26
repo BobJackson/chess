@@ -52,7 +52,8 @@ audio.init();
 (function () {
   assert('SFX 池数量', Object.keys(audio.sfx).length, 7);
   truthy('BGM 上下文已建', audio.bgm);
-  assert('BGM 源', audio.bgm.src, '/audio/bgm.m4a');
+  assert('BGM 默认曲目为松风', audio.bgm.src, '/audio/bgm-songfeng.m4a');
+  assert('曲目下标', audio.track, 0);
   assert('BGM 循环', audio.bgm.loop, true);
   assert('落子音效源', audio.sfx.move.src, '/audio/move.wav');
 })();
@@ -104,6 +105,34 @@ console.log('\n[5] BGM 控制');
   assert('关音乐后 startBgm 返回 false', audio.startBgm(), false);
   audio.setBgmOn(true);
   assert('开音乐后恢复播放', b.plays, p0 + 2);
+})();
+
+console.log('\n[5.5] BGM 多曲目切换');
+(function () {
+  var b = audio.bgm;
+  var s0 = b.stops, p0 = b.plays;
+
+  // 播放中切曲：换源 + 立即续播 + 持久化
+  audio.startBgm();
+  assert('切到桂月（下标）', audio.setTrack(1), 1);
+  assert('BGM 源已换', b.src, '/audio/bgm-guiyue.m4a');
+  truthy('切曲前先 stop', b.stops > s0);
+  assert('切曲后续播', b.plays, p0 + 2);
+  assert('曲目已持久化', store['chess_bgm_track'], 1);
+  assert('曲目名', audio.trackName(), '桂月');
+
+  // key 寻址与非法输入
+  assert('按 key 切回松风', audio.setTrack('songfeng'), 0);
+  assert('非法下标不改曲目', audio.setTrack(9), 0);
+  assert('非法 key 不改曲目', audio.setTrack('???'), 0);
+
+  // 关音乐时切曲：只换源不续播
+  audio.setBgmOn(false);
+  var p1 = b.plays;
+  audio.setTrack(1);
+  assert('关音乐切曲不续播', b.plays, p1);
+  audio.setBgmOn(true);
+  audio.setTrack(0);
 })();
 
 console.log('\n[6] 杀法语音');

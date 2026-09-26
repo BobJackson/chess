@@ -3,7 +3,7 @@
  *
  * 二人专属的胜负记录：松（本机方）vs 桂（对面的人）。
  * 只记「人对人」的局——人机对战是练棋，不入账：
- *   本地双人：红方 = 松，黑方 = 桂（红先，长幼有序）
+ *   本地双人：默认红 = 松、黑 = 桂；设置页选了「让先执黑」则松执黑，按松的边记
  *   好友联机：本机方 = 松，对方 = 桂（账本是各存各的，各记各的视角）
  *
  * 存储通过注入的 storage 适配器（{ get(key), set(key, value) }），
@@ -47,7 +47,7 @@ function sanitize(data) {
  *
  * @param {string} mode 'ai' | 'local' | 'online'
  * @param {object} result Game 的 result（winner: 0 红 / 1 黑 / -1 和）
- * @param {number} [humanSide] 联机时本机方阵营
+ * @param {number} [humanSide] 松的阵营：联机=本机方；本地=设置页所选边（缺省执红，兼容旧口径）
  * @returns {?string} 'song' | 'gui' | 'draw'；不入账（人机/未知模式/无结果）返回 null
  */
 function outcomeFor(mode, result, humanSide) {
@@ -55,7 +55,10 @@ function outcomeFor(mode, result, humanSide) {
   if (mode !== 'local' && mode !== 'online') return null;
   var w = result.winner;
   if (w !== C.RED && w !== C.BLACK) return 'draw';
-  if (mode === 'local') return w === C.RED ? 'song' : 'gui';
+  if (mode === 'local') {
+    var songSide = humanSide === C.BLACK ? C.BLACK : C.RED;
+    return w === songSide ? 'song' : 'gui';
+  }
   return w === humanSide ? 'song' : 'gui';
 }
 

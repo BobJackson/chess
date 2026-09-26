@@ -47,6 +47,10 @@ console.log('\n[1] outcomeFor 映射');
   assert('联机对方胜记桂', Ledger.outcomeFor('online', resultOf(C.BLACK), C.RED), 'gui');
   assert('联机执黑时本机胜仍记松', Ledger.outcomeFor('online', resultOf(C.BLACK), C.BLACK), 'song');
   assert('联机和棋', Ledger.outcomeFor('online', resultOf(-1), C.RED), 'draw');
+  // 本地双人「让先执黑」（设置页选边）：松执黑，黑胜记松（缺省 humanSide 仍兼容旧口径红=松）
+  assert('本地松执黑时黑胜记松', Ledger.outcomeFor('local', resultOf(C.BLACK), C.BLACK), 'song');
+  assert('本地松执黑时红胜记桂', Ledger.outcomeFor('local', resultOf(C.RED), C.BLACK), 'gui');
+  assert('本地松执黑时和棋', Ledger.outcomeFor('local', resultOf(-1), C.BLACK), 'draw');
   // 人机不入账；无结果不入账
   assert('人机不入账', Ledger.outcomeFor('ai', resultOf(C.RED)), null);
   assert('无结果不入账', Ledger.outcomeFor('local', null), null);

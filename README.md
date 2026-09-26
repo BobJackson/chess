@@ -41,7 +41,8 @@ miniprogram/
     particles.js             粒子系统：固定池零分配（木屑/桂花/冲击波环/墨滴）
     chrome.js                屏幕级装饰（对局/复盘共享）：底色/棋桌面板/水印饰线
   audio/
-    bgm.m4a                  中国风 BGM（38.7s 无缝循环段，AAC 56kbps 单声道）
+    bgm-songfeng.m4a         BGM《松风》：合成主题曲（gen-bgm.js，58.4s 无缝循环）
+    bgm-guiyue.m4a           BGM《桂月》：实录氛围（修复循环版，38.7s 无缝循环）
     *.wav                    合成音效：落子/吃子/将军/胜/负/按钮/悔棋
   net/
     transport.js             传输接口约定 + 回环传输对（测试用）
@@ -54,6 +55,7 @@ miniprogram/
     menu.js                  主菜单：难度分段 + 三模式入口
     board.js                 对局：状态栏+棋盘+工具栏，ai/local/online 三模式
     replay.js                复盘：终局后按记谱逐步回放（步进/回退/自动播放/绝杀重演）
+    settings.js              设置：音乐/配乐/音效/先后手统一入口（行式分段控件）
     lobby.js                 联机大厅：建房/加入 + 软键盘房间号
     rules.js                 规则：可滚动文本
 ```
@@ -117,11 +119,20 @@ docker compose up -d
 
 ## 音频与沉浸感
 
-- **BGM**：`audio/bgm.m4a`，中国风古筝/箫氛围循环段（38.7s，AAC 56kbps 单声道，284KB）；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。已做循环优化：裁掉原文件的 25 秒静音尾，接缝用 1.5s 等功率交叉淡化，循环无"磕绊"也无静默空窗。
+- **BGM 双曲目**：《松风》（`bgm-songfeng.m4a`，58.4s）与《桂月》（`bgm-guiyue.m4a`，38.7s），设置页「配乐」自由切换，当前曲目持久化；均做无缝循环（等功率交叉淡化接缝）。`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。
+  - 《松风》：`npm run gen:bgm`（`scripts/gen-bgm.js`）纯数学合成——D 宫五声音阶 66BPM，古筝拨弦（失谐泛音+长音揉弦）+ 琶音 + 低音拨弦 + 箫垫底，A/B 两段；输出 WAV 后用 afconvert 编码（脚本末尾有提示）。
+  - 《桂月》：原实录素材修复版（裁 25s 静音尾 + 1.5s 交叉淡化循环 + 峰值规范化）。
 - **音效**：`audio/*.wav` 由 `npm run gen:sfx`（`scripts/gen-sfx.js`）纯数学合成，无外部素材——落子木质"笃"、吃子闷响、将军两声警示钟、胜/负五声琶音与低锣、按钮轻击、悔棋上挑。
-- **触发点**：落子/吃子/将军/终局/工具栏/菜单/大厅按钮；菜单提供「音乐」「音效」独立开关，与静音状态一起用 `wx.setStorageSync` 持久化。
-- 重新生成音效：`npm run gen:sfx`；替换 BGM 只需覆盖 `audio/bgm.m4a`（建议 ≤64s、单声道、AAC ≤64kbps 以控制包体；循环曲注意接缝连续性）。
+- **开关与设置**：系统设置页（菜单「系统设置」按钮，位于查看规则之下）统一管理：音乐开关 / 配乐切换 / 音效开关 / 先后手；开关与曲目选择用 `wx.setStorageSync` 持久化。
+- 重新生成音效：`npm run gen:sfx`；新增 BGM 曲目：放入 `audio/` 并在 `ui/audio.js` 的 `BGM_TRACKS` 加一行，设置页配乐选项自动跟随。
 - **绝杀语音**：`audio/mate-<key>.m4a`，终局判出杀法时把名字念出来（不只是弹窗显示）。由 `npm run gen:voice`（`scripts/gen-mate-voice.js`）用 macOS 自带的 `say` + `afconvert` 合成，11 条约 88KB；清单以 `core/mate.js` 为单一数据源，改名只需重跑脚本。音频按需创建上下文，不在启动时占用。
+
+## 先后手（让先）
+
+设置页「先后手」分段：默认**执红先手**，可选**让先执黑**（人机/本地生效；联机由房间分配，房主执红）。
+
+- 人机执黑：AI 执红自动先走，棋盘整盘翻转为黑方视角；悔棋若悔回开局会自动重新调度 AI，不会卡局。
+- 本地双人执黑：松执黑，账本按松的边记（黑胜记松）。
 
 ## 松桂账本
 
@@ -285,7 +296,7 @@ docker compose up -d
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 1278 项
+npm test                 # 串联全部，当前 1326 项
 npm run test:engine      # 引擎 64
 npm run test:ai          # AI 40（含分片搜索与同步搜索的确定性一致）
 npm run test:game        # 对局 117
@@ -298,8 +309,8 @@ npm run test:endgame     # 绝杀演出 137（含动作层：炮弹/马跃/车�
 npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21
 npm run test:ws          # 自建 WS 通道（relay+适配器+假服务端）22
-npm run test:audio       # 音频管理器 47
-npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本、打击感、复盘）152
+npm run test:audio       # 音频管理器 58（含 BGM 多曲目切换与持久化）
+npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本、打击感、设置页、让先、复盘）186
 ```
 
 杀法的测试局面（15 个已用引擎确认过的将死局面）放在 `scripts/fixtures/mate-cases.js`，
@@ -310,6 +321,7 @@ npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演�
 - 点选：先点己方棋子再点绿色落点；拖拽：按住拖到落点松手（拖拽中高亮落点）。
 - 工具栏（自绘于棋盘下方）：悔棋 / 提示 / 翻转 / 重开 / 菜单；联机时悔棋与重开禁用。
 - 规则页支持上下拖动滚动。
+- 系统设置（菜单最下方）：音乐开关 / 配乐切换（松风·桂月）/ 音效开关 / 先后手（执红·让先执黑）。
 
 ## 规则实现
 

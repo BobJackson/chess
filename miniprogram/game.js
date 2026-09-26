@@ -15,9 +15,11 @@ var createBoard = require('./scenes/board.js');
 var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
 var createReplay = require('./scenes/replay.js');
+var createSettings = require('./scenes/settings.js');
 var audio = require('./ui/audio.js');
 var NET_CONFIG = require('./net/config.js');
 var Ledger = require('./core/ledger.js');
+var C = require('./core/constants.js');
 
 audio.init();
 
@@ -45,6 +47,8 @@ var app = {
   ctx: ctx,
   canvas: canvas,
   difficulty: 'normal',
+  /** 先后手选择（人机/本地生效，设置页修改）：执红先手 / 让先执黑；联机由房间分配 */
+  humanSide: C.RED,
   session: null,
   transport: null,
   cloudReady: false,
@@ -93,6 +97,7 @@ var app = {
     if (name === 'lobby') return createLobby(app);
     if (name === 'rules') return createRules(app);
     if (name === 'replay') return createReplay(app);
+    if (name === 'settings') return createSettings(app);
     return null;
   }
 };

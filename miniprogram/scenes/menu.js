@@ -65,15 +65,8 @@ function createMenuScene(app) {
       W.makeButton('ai', pad, y, bw, bh, '人机对战'),
       W.makeButton('local', pad, y + bh + gap, bw, bh, '本地双人'),
       W.makeButton('online', pad, y + (bh + gap) * 2, bw, bh, '好友联机'),
-      W.makeButton('rules', pad, y + (bh + gap) * 3, bw, bh, '查看规则', 'ghost')
-    ];
-
-    // 音乐 / 音效开关（标签随状态在 render 中动态填充）
-    var ty = y + (bh + gap) * 4 - gap + 12;
-    var tw = (bw - 12) / 2;
-    scene.toggles = [
-      W.makeButton('bgm', pad, ty, tw, 36, '', 'ghost'),
-      W.makeButton('sfx', pad + tw + 12, ty, tw, 36, '', 'ghost')
+      W.makeButton('rules', pad, y + (bh + gap) * 3, bw, bh, '查看规则', 'ghost'),
+      W.makeButton('settings', pad, y + (bh + gap) * 4, bw, bh, '系统设置', 'ghost')
     ];
   };
 
@@ -88,9 +81,8 @@ function createMenuScene(app) {
         app.audio.play('tap');
         return;
       }
-      var all = scene.buttons.concat(scene.toggles);
-      for (var i = 0; i < all.length; i++) {
-        if (W.hitButton(all[i], x, y)) { scene.pressed = all[i].id; return; }
+      for (var i = 0; i < scene.buttons.length; i++) {
+        if (W.hitButton(scene.buttons[i], x, y)) { scene.pressed = scene.buttons[i].id; return; }
       }
       return;
     }
@@ -100,19 +92,6 @@ function createMenuScene(app) {
     scene.pressed = null;
     if (!id) return;
 
-    // 开关类
-    if (id === 'bgm' || id === 'sfx') {
-      for (var t = 0; t < scene.toggles.length; t++) {
-        if (scene.toggles[t].id === id && W.hitButton(scene.toggles[t], x, y)) {
-          if (id === 'bgm') app.audio.setBgmOn(!app.audio.bgmOn);
-          else app.audio.setSfxOn(!app.audio.sfxOn);
-          app.audio.play('tap');
-          return;
-        }
-      }
-      return;
-    }
-
     for (var b = 0; b < scene.buttons.length; b++) {
       var btn = scene.buttons[b];
       if (btn.id === id && W.hitButton(btn, x, y)) {
@@ -121,6 +100,7 @@ function createMenuScene(app) {
         else if (id === 'local') app.go('board', { mode: 'local' });
         else if (id === 'online') app.go('lobby');
         else if (id === 'rules') app.go('rules');
+        else if (id === 'settings') app.go('settings');
         return;
       }
     }
@@ -151,12 +131,6 @@ function createMenuScene(app) {
       W.drawButton(ctx, scene.buttons[i], scene.pressed === scene.buttons[i].id);
     }
 
-    // 开关按钮：标签反映当前状态
-    scene.toggles[0].label = '音乐 ' + (app.audio.bgmOn ? '开' : '关');
-    scene.toggles[1].label = '音效 ' + (app.audio.sfxOn ? '开' : '关');
-    for (var g = 0; g < scene.toggles.length; g++) {
-      W.drawButton(ctx, scene.toggles[g], scene.pressed === scene.toggles[g].id);
-    }
     W.drawText(ctx, '人机与本地双人纯本地运行 · 联机需云开发', w / 2, h - 24, 11, W.THEME.subtitle, 'center');
 
     // 桂花落在最上层（极淡，像从屏前飘过）

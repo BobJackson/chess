@@ -1,7 +1,8 @@
 /**
  * 音频管理器（小游戏）
  *
- * - BGM：单个 InnerAudioContext，loop 循环，切后台暂停/回前台恢复
+ * - BGM：单个 InnerAudioContext，loop 循环，切后台暂停/回前台恢复；
+ *        多曲目管理（BGM_TRACKS），当前曲目持久化，切曲即时生效
  * - SFX：预建对象池复用，避免每次播放新建上下文
  * - 开关：音乐 / 音效独立开关，静音与开关状态用 wx.setStorageSync 持久化
  * - 平台限制：iOS 需用户首次交互后才能出声，故 BGM 由入口在首次触摸时启动
@@ -19,7 +20,14 @@ var SFX_FILES = {
   undo: '/audio/undo.wav'
 };
 
-var BGM_FILE = '/audio/bgm.m4a';
+/**
+ * BGM 曲目库：松风（合成主题曲，gen-bgm.js）/ 桂月（实录氛围，修复循环版）
+ * 增曲：加文件 + 这里加一行，设置页的配乐选项自动跟随
+ */
+var BGM_TRACKS = [
+  { key: 'songfeng', name: '松风', src: '/audio/bgm-songfeng.m4a' },
+  { key: 'guiyue', name: '桂月', src: '/audio/bgm-guiyue.m4a' }
+];
 
 /** 杀法语音的路径前缀：/audio/mate-<key>.m4a，key 来自 core/mate.js */
 var MATE_VOICE_PREFIX = '/audio/mate-';
@@ -34,6 +42,8 @@ function AudioMgr() {
   this.muted = false;
   this.bgmOn = true;
   this.sfxOn = true;
+  /** 当前曲目在 BGM_TRACKS 的下标 */
+  this.track = 0;
 }
 
 AudioMgr.prototype.init = function () {
@@ -47,6 +57,8 @@ AudioMgr.prototype.init = function () {
     this.muted = !!wx.getStorageSync('chess_muted');
     this.bgmOn = wx.getStorageSync('chess_bgm_off') ? false : true;
     this.sfxOn = wx.getStorageSync('chess_sfx_off') ? false : true;
+    var t = wx.getStorageSync('chess_bgm_track');
+    if (typeof t === 'number' && BGM_TRACKS[t]) this.track = t;
   } catch (e) { /* 存储不可用时用缺省值 */ }
 
   var self = this;
@@ -58,7 +70,7 @@ AudioMgr.prototype.init = function () {
   });
 
   this.bgm = wx.createInnerAudioContext();
-  this.bgm.src = BGM_FILE;
+  this.bgm.src = BGM_TRACKS[this.track].src;
   this.bgm.loop = true;
   this.bgm.volume = 0.4;
   return this;
@@ -143,11 +155,38 @@ AudioMgr.prototype.setSfxOn = function (on) {
   return this.sfxOn;
 };
 
+/**
+ * 切换 BGM 曲目（设置页调用）；正在播放时换源并立即续播
+ * @param {number|string} idx BGM_TRACKS 下标或 key
+ */
+AudioMgr.prototype.setTrack = function (idx) {
+  if (typeof idx === 'string') {
+    for (var i = 0; i < BGM_TRACKS.length; i++) {
+      if (BGM_TRACKS[i].key === idx) { idx = i; break; }
+    }
+  }
+  if (typeof idx !== 'number' || !BGM_TRACKS[idx]) return this.track;
+  this.track = idx;
+  this._store('chess_bgm_track', idx);
+  if (this.bgm) {
+    var playing = this.bgmOn && !this.muted;
+    try { this.bgm.stop(); } catch (e) {}
+    this.bgm.src = BGM_TRACKS[idx].src;
+    if (playing) this.startBgm();
+  }
+  return this.track;
+};
+
+/** 当前曲目名（设置页显示用） */
+AudioMgr.prototype.trackName = function () {
+  return BGM_TRACKS[this.track].name;
+};
+
 AudioMgr.prototype._store = function (k, v) {
   try { wx.setStorageSync(k, v); } catch (e) {}
 };
 
 module.exports = new AudioMgr();
 module.exports.SFX_FILES = SFX_FILES;
-module.exports.BGM_FILE = BGM_FILE;
+module.exports.BGM_TRACKS = BGM_TRACKS;
 module.exports.MATE_VOICE_PREFIX = MATE_VOICE_PREFIX;
