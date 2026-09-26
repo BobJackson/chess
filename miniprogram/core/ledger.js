@@ -19,8 +19,22 @@ var KEY = 'songgui-ledger-v1';
 /** 账本结构版本 */
 var VERSION = 1;
 
+/** 逐局历史上限：够翻一阵子的，又不让 storage 无限膨胀 */
+var MAX_GAMES = 50;
+
 function blank() {
-  return { v: VERSION, total: 0, song: 0, gui: 0, draws: 0, last: null };
+  return { v: VERSION, total: 0, song: 0, gui: 0, draws: 0, last: null, games: [] };
+}
+
+/** 逐局记录条目清洗；非法条目丢弃 */
+function sanitizeGame(g) {
+  if (!g || typeof g !== 'object' || typeof g.t !== 'number') return null;
+  return {
+    t: g.t,
+    mode: g.mode === 'online' ? 'online' : 'local',
+    outcome: g.outcome === 'song' || g.outcome === 'gui' ? g.outcome : 'draw',
+    text: typeof g.text === 'string' ? g.text : ''
+  };
 }
 
 /** 容忍脏数据：字段缺失或类型不对就回退到空账本 */
@@ -38,6 +52,14 @@ function sanitize(data) {
       outcome: data.last.outcome === 'song' || data.last.outcome === 'gui' ? data.last.outcome : 'draw',
       text: typeof data.last.text === 'string' ? data.last.text : ''
     };
+  }
+  // 逐局历史（v1 旧账没有此字段，补空数组自然兼容）
+  if (Array.isArray(data.games)) {
+    for (var i = 0; i < data.games.length; i++) {
+      var g = sanitizeGame(data.games[i]);
+      if (g) d.games.push(g);
+    }
+    if (d.games.length > MAX_GAMES) d.games = d.games.slice(-MAX_GAMES);
   }
   return d;
 }
@@ -104,6 +126,11 @@ function create(storage) {
         outcome: outcome,
         text: args.result && typeof args.result.text === 'string' ? args.result.text : ''
       };
+      // 逐局历史（详情页数据源）：与 last 同一份信息，FIFO 截到上限
+      d.games.push({
+        t: d.last.t, mode: d.last.mode, outcome: outcome, text: d.last.text
+      });
+      if (d.games.length > MAX_GAMES) d.games = d.games.slice(-MAX_GAMES);
       save();
       return outcome;
     },
@@ -144,6 +171,33 @@ function create(storage) {
       save();
     },
 
+    /**
+     * 逐局历史（最旧 → 最新；展示层要最新在上请自行 reverse）
+     * @returns {Array<{t:number, mode:string, outcome:string, text:string}>}
+     */
+    history: function () {
+      return load().games.slice();
+    },
+
+    /**
+     * 当前连胜：从最新一局往前数同一结果的连段
+     * 和棋断连；不足 2 场不算连胜
+     * @returns {?{who:'song'|'gui', n:number}}
+     */
+    streak: function () {
+      var g = load().games;
+      var who = null;
+      var n = 0;
+      for (var i = g.length - 1; i >= 0; i--) {
+        var o = g[i].outcome;
+        if (o === 'draw') break;
+        if (who === null) who = o;
+        else if (o !== who) break;
+        n++;
+      }
+      return (who && n >= 2) ? { who: who, n: n } : null;
+    },
+
     /** 测试用：丢弃缓存强制重读存储 */
     _reload: function () { cache = null; }
   };
@@ -152,6 +206,7 @@ function create(storage) {
 module.exports = {
   KEY: KEY,
   VERSION: VERSION,
+  MAX_GAMES: MAX_GAMES,
   create: create,
   outcomeFor: outcomeFor
 };

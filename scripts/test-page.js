@@ -46,6 +46,7 @@ function createStubContext() {
     clearRect: function () { calls.clearRect++; },
     fillRect: function () {}, strokeRect: function () {},
     beginPath: function () {}, closePath: function () {},
+    rect: function () {}, clip: function () {},
     moveTo: function () {}, lineTo: function () {},
     arc: function () { calls.arc++; },
     arcTo: function () {},
@@ -756,7 +757,50 @@ console.log('\n[14] 让先执黑：人机 AI 先手 + 本地账本按松的边�
   assert('回菜单收尾', manager.current.name, 'menu');
 })();
 
-console.log('\n[15] 复盘：步进/回退/自动播放/绝杀重演');
+console.log('\n[15] 账本详情页：比分/连胜/逐局列表/滚动');
+(function () {
+  var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
+  var m = manager.current;
+  assert('当前在菜单', m.name, 'menu');
+  pump(16);
+  truthy('比分行带可点箭头', global.__canvas.ctx.calls.fillText.indexOf('›') >= 0);
+
+  // 此前账本流水：[10] 桂胜(local) → 松胜(online) → [14] 松胜(local 执黑)
+  // 旧→新 [gui, song, song]，应见「松 · 2 连胜」
+  var lr = m.ledgerRect;
+  truthy('账本行热区已建', lr);
+  tap(lr.x + lr.w / 2, lr.y + lr.h / 2);
+  assert('进入账本详情页', manager.current.name, 'ledger');
+  var s = manager.current;
+  assert('逐局行数', s.rows.length, 3);
+  assert('最新局在上', s.rows[0].outcome, 'song');
+  assert('大比分文案', s.scoreLine, '松 2 : 1 桂');
+  assert('连胜横幅', s.streakLine, '松 · 2 连胜');
+  pump(16);
+  truthy('详情页标题已绘制', global.__canvas.ctx.calls.fillText.indexOf('松桂账本') >= 0);
+  truthy('连胜横幅已绘制', global.__canvas.ctx.calls.fillText.indexOf('松 · 2 连胜') >= 0);
+
+  // 补 20 局制造可滚动列表，重进页面验证滚动
+  for (var i = 0; i < 20; i++) {
+    app.ledger.record({ mode: 'local', result: { winner: C.RED, reason: '将死', text: '测试局 ' + (i + 1) } });
+  }
+  app.go('menu');
+  var m2 = manager.current;
+  tap(m2.ledgerRect.x + m2.ledgerRect.w / 2, m2.ledgerRect.y + m2.ledgerRect.h / 2);
+  var s2 = manager.current;
+  assert('补记后行数', s2.rows.length, 23);
+  truthy('产生可滚动区间', s2.maxScroll > 0);
+  var y0 = s2.listTop + 100;
+  touchHandlers.start({ touches: [{ clientX: 187, clientY: y0 + 120 }] });
+  touchHandlers.move({ touches: [{ clientX: 187, clientY: y0 }] });
+  touchHandlers.end({ changedTouches: [{ clientX: 187, clientY: y0 }] });
+  truthy('拖动产生滚动', s2.scrollY > 0);
+
+  tap(s2.back.x + s2.back.w / 2, s2.back.y + s2.back.h / 2);
+  assert('返回菜单', manager.current.name, 'menu');
+})();
+
+console.log('\n[16] 复盘：步进/回退/自动播放/绝杀重演');
 (function () {
   var Game = require(path.join(__dirname, '..', 'miniprogram', 'core', 'game.js'));
   var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));

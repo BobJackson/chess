@@ -16,6 +16,7 @@ var createLobby = require('./scenes/lobby.js');
 var createRules = require('./scenes/rules.js');
 var createReplay = require('./scenes/replay.js');
 var createSettings = require('./scenes/settings.js');
+var createLedger = require('./scenes/ledger.js');
 var audio = require('./ui/audio.js');
 var NET_CONFIG = require('./net/config.js');
 var Ledger = require('./core/ledger.js');
@@ -105,6 +106,7 @@ var app = {
     if (name === 'rules') return createRules(app);
     if (name === 'replay') return createReplay(app);
     if (name === 'settings') return createSettings(app);
+    if (name === 'ledger') return createLedger(app);
     return null;
   }
 };

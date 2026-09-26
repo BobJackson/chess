@@ -11,7 +11,8 @@ var PETAL_MAX = 16;
 
 /**
  * 松桂账本：副标题下方的比分行
- * 有账时「松 12 : 9 桂」用描题色加粗、两侧饰线；无账时低调一行小字
+ * 有账时「松 12 : 9 桂」用描题色加粗、两侧饰线；无账时低调一行小字。
+ * 整行可点进账本详情页（右侧一枚小 › 提示）。
  */
 function drawLedger(ctx, w, y, app) {
   var line1 = app.ledger.line();
@@ -32,6 +33,8 @@ function drawLedger(ctx, w, y, app) {
     ctx.restore();
     W.drawText(ctx, line1, cx, y, 14, W.THEME.title, 'center', true);
     if (line2) W.drawText(ctx, line2, cx, y + 18, 11, W.THEME.subtitle, 'center');
+    // 可点提示：饰线之外的一枚小箭头
+    W.drawText(ctx, '›', cx + tw / 2 + 44, y, 14, W.THEME.subtitle, 'center', true);
   } else {
     W.drawText(ctx, line1, w / 2, y, 12, W.THEME.subtitle, 'center');
   }
@@ -68,6 +71,11 @@ function createMenuScene(app) {
       W.makeButton('rules', pad, y + (bh + gap) * 3, bw, bh, '查看规则', 'ghost'),
       W.makeButton('settings', pad, y + (bh + gap) * 4, bw, bh, '系统设置', 'ghost')
     ];
+
+    // 账本行整体可点进详情页（比分行 + 最近局两行都在热区内）
+    scene.ledgerRect = app.ledger
+      ? { x: w / 2 - 120, y: h * 0.14 + 44, w: 240, h: 52 }
+      : null;
   };
 
   scene.onTouch = function (type, x, y) {
@@ -81,6 +89,12 @@ function createMenuScene(app) {
         app.audio.play('tap');
         return;
       }
+      if (scene.ledgerRect && app.ledger.summary().total > 0 &&
+        x >= scene.ledgerRect.x && x <= scene.ledgerRect.x + scene.ledgerRect.w &&
+        y >= scene.ledgerRect.y && y <= scene.ledgerRect.y + scene.ledgerRect.h) {
+        scene.pressed = 'ledger';
+        return;
+      }
       for (var i = 0; i < scene.buttons.length; i++) {
         if (W.hitButton(scene.buttons[i], x, y)) { scene.pressed = scene.buttons[i].id; return; }
       }
@@ -91,6 +105,15 @@ function createMenuScene(app) {
     var id = scene.pressed;
     scene.pressed = null;
     if (!id) return;
+
+    if (id === 'ledger') {
+      var r = scene.ledgerRect;
+      if (r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        app.audio.play('tap');
+        app.go('ledger');
+      }
+      return;
+    }
 
     for (var b = 0; b < scene.buttons.length; b++) {
       var btn = scene.buttons[b];

@@ -93,6 +93,62 @@ console.log('\n[2] 记账与汇总');
   assert('无和棋比分行', l2.line(), '松 1 : 0 桂');
 })();
 
+console.log('\n[2.5] 逐局历史与连胜');
+(function () {
+  var st = memStorage();
+  var l = Ledger.create(st);
+
+  function rec(mode, winner, when) {
+    l.record({ mode: mode, result: resultOf(winner, '测试终局'), humanSide: C.RED, when: when });
+  }
+
+  assert('空账无历史', l.history().length, 0);
+  assert('空账无连胜', l.streak(), null);
+
+  rec('local', C.RED, 1000);   // 松
+  rec('local', -1, 2000);      // 和
+  rec('online', C.RED, 3000);  // 松
+  assert('历史按时间序（最旧在前）', l.history().length, 3);
+  assert('历史条目字段', (function () {
+    var g = l.history()[0];
+    return g.t + ',' + g.mode + ',' + g.outcome + ',' + g.text;
+  })(), '1000,local,song,测试终局');
+  assert('一胜不算连胜', l.streak(), null);
+
+  rec('online', C.RED, 4000);  // 松
+  var s1 = l.streak();
+  assert('两连胜成立', s1 ? s1.who + s1.n : '', 'song2');
+
+  rec('local', C.BLACK, 5000); // 桂（local 缺省红=松，黑胜记桂）
+  assert('被终结后无连胜', l.streak(), null);
+  rec('local', C.BLACK, 6000); // 桂
+  var s2 = l.streak();
+  assert('桂两连胜', s2 ? s2.who + s2.n : '', 'gui2');
+
+  rec('local', -1, 7000);      // 和棋断连
+  assert('和棋断连胜', l.streak(), null);
+
+  // 上限：记满 MAX_GAMES+5 局，历史截到上限且保留最新
+  for (var i = 0; i < Ledger.MAX_GAMES + 5; i++) rec('local', C.RED, 10000 + i);
+  assert('历史截到上限', l.history().length, Ledger.MAX_GAMES);
+  var last = l.history()[l.history().length - 1];
+  assert('上限截断保留最新', last.t, 10000 + Ledger.MAX_GAMES + 4);
+})();
+
+console.log('\n[2.6] 旧账数据兼容（无 games 字段）');
+(function () {
+  var st = memStorage();
+  // 模拟 v1.0.8 时代的旧账：只有计数与 last
+  st.data['songgui-ledger-v1'] = { v: 1, total: 3, song: 2, gui: 1, draws: 0,
+    last: { t: 1000, mode: 'local', outcome: 'song', text: '旧局' } };
+  var l = Ledger.create(st);
+  assert('旧账计数保留', l.summary().total, 3);
+  assert('旧账历史为空', l.history().length, 0);
+  l.record({ mode: 'local', result: resultOf(C.RED), when: 2000 });
+  assert('旧账续记后历史从 1 开始', l.history().length, 1);
+  assert('旧账计数续增', l.summary().total, 4);
+})();
+
 console.log('\n[3] 存储往返与脏数据');
 (function () {
   var st = memStorage();

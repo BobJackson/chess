@@ -55,7 +55,8 @@ miniprogram/
     menu.js                  主菜单：难度分段 + 三模式入口
     board.js                 对局：状态栏+棋盘+工具栏，ai/local/online 三模式
     replay.js                复盘：终局后按记谱逐步回放（步进/回退/自动播放/绝杀重演）
-    settings.js              设置：音乐/配乐/音效/先后手统一入口（行式分段控件）
+    settings.js              系统设置：音乐/配乐/音效/先后手统一入口（行式分段控件）
+    ledger.js                账本详情：大比分 + 连胜横幅 + 逐局历史列表（可滚动）
     lobby.js                 联机大厅：建房/加入 + 软键盘房间号
     rules.js                 规则：可滚动文本
 ```
@@ -138,9 +139,11 @@ docker compose up -d
 
 二人专属的胜负账：只记「人对人」的局（人机是练棋，不入账），本机 `wx.setStorageSync` 持久化，主菜单展示「松 12 : 9 桂 · 和 2」与最近一局结果。
 
-- **本地双人**：红方 = 松，黑方 = 桂（红先，长幼有序）
+- **本地双人**：默认红 = 松、黑 = 桂；设置页选「让先执黑」则松执黑，按松的边记
 - **好友联机**：本机方 = 松，对方 = 桂（账本各存各的，各记各的视角）
 - 实现在 `core/ledger.js`（纯 JS 可单测，存储失败降级内存账）；终局时在 `scenes/board.js` 的 `showResult` 记账，每局只记一次。
+
+**账本详情页**：主菜单比分行可点（带 › 提示），进入独立场景——大比分、当前连胜（同一人连赢 ≥2 局、和棋断连）、逐局历史列表（日期/模式/胜负 + 结果文案，最新在上，可拖动滚动）。逐局历史存最近 50 局（FIFO），旧账数据无此字段自动兼容、从下一局开始积累。
 
 ## AI 分片搜索（不冻屏）
 
@@ -296,11 +299,11 @@ docker compose up -d
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 1326 项
+npm test                 # 串联全部，当前 1356 项
 npm run test:engine      # 引擎 64
 npm run test:ai          # AI 40（含分片搜索与同步搜索的确定性一致）
 npm run test:game        # 对局 117
-npm run test:ledger      # 松桂账本 34
+npm run test:ledger      # 松桂账本 52（含逐局历史/连胜/上限/旧账兼容）
 npm run test:mate        # 杀法识别 161
 npm run test:ui          # 布局/渲染 168（含走子抛物线与吃子击飞）
 npm run test:particles   # 粒子系统 25
@@ -310,7 +313,7 @@ npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21
 npm run test:ws          # 自建 WS 通道（relay+适配器+假服务端）22
 npm run test:audio       # 音频管理器 58（含 BGM 多曲目切换与持久化）
-npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本、打击感、设置页、让先、复盘）186
+npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本详情、打击感、设置页、让先、复盘）201
 ```
 
 杀法的测试局面（15 个已用引擎确认过的将死局面）放在 `scripts/fixtures/mate-cases.js`，
