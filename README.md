@@ -41,7 +41,7 @@ miniprogram/
     particles.js             粒子系统：固定池零分配（木屑/桂花/冲击波环/墨滴）
     chrome.js                屏幕级装饰（对局/复盘共享）：底色/棋桌面板/水印饰线
   audio/
-    bgm.mp3                  中国风 BGM（64s 循环段，56kbps 单声道）
+    bgm.m4a                  中国风 BGM（38.7s 无缝循环段，AAC 56kbps 单声道）
     *.wav                    合成音效：落子/吃子/将军/胜/负/按钮/悔棋
   net/
     transport.js             传输接口约定 + 回环传输对（测试用）
@@ -117,10 +117,10 @@ docker compose up -d
 
 ## 音频与沉浸感
 
-- **BGM**：`audio/bgm.mp3`，中国风古筝/箫氛围循环段；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。
+- **BGM**：`audio/bgm.m4a`，中国风古筝/箫氛围循环段（38.7s，AAC 56kbps 单声道，284KB）；`InnerAudioContext.loop` 循环，切后台自动暂停、回前台恢复；受 iOS 限制在**首次触摸**后启动。已做循环优化：裁掉原文件的 25 秒静音尾，接缝用 1.5s 等功率交叉淡化，循环无"磕绊"也无静默空窗。
 - **音效**：`audio/*.wav` 由 `npm run gen:sfx`（`scripts/gen-sfx.js`）纯数学合成，无外部素材——落子木质"笃"、吃子闷响、将军两声警示钟、胜/负五声琶音与低锣、按钮轻击、悔棋上挑。
 - **触发点**：落子/吃子/将军/终局/工具栏/菜单/大厅按钮；菜单提供「音乐」「音效」独立开关，与静音状态一起用 `wx.setStorageSync` 持久化。
-- 重新生成音效：`npm run gen:sfx`；替换 BGM 只需覆盖 `audio/bgm.mp3`（建议 ≤64s、单声道 ≤64kbps 以控制包体）。
+- 重新生成音效：`npm run gen:sfx`；替换 BGM 只需覆盖 `audio/bgm.m4a`（建议 ≤64s、单声道、AAC ≤64kbps 以控制包体；循环曲注意接缝连续性）。
 - **绝杀语音**：`audio/mate-<key>.m4a`，终局判出杀法时把名字念出来（不只是弹窗显示）。由 `npm run gen:voice`（`scripts/gen-mate-voice.js`）用 macOS 自带的 `say` + `afconvert` 合成，11 条约 88KB；清单以 `core/mate.js` 为单一数据源，改名只需重跑脚本。音频按需创建上下文，不在启动时占用。
 
 ## 松桂账本

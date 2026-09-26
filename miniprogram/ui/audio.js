@@ -19,7 +19,7 @@ var SFX_FILES = {
   undo: '/audio/undo.wav'
 };
 
-var BGM_FILE = '/audio/bgm.mp3';
+var BGM_FILE = '/audio/bgm.m4a';
 
 /** 杀法语音的路径前缀：/audio/mate-<key>.m4a，key 来自 core/mate.js */
 var MATE_VOICE_PREFIX = '/audio/mate-';

@@ -52,7 +52,7 @@ audio.init();
 (function () {
   assert('SFX 池数量', Object.keys(audio.sfx).length, 7);
   truthy('BGM 上下文已建', audio.bgm);
-  assert('BGM 源', audio.bgm.src, '/audio/bgm.mp3');
+  assert('BGM 源', audio.bgm.src, '/audio/bgm.m4a');
   assert('BGM 循环', audio.bgm.loop, true);
   assert('落子音效源', audio.sfx.move.src, '/audio/move.wav');
 })();
