@@ -333,6 +333,37 @@ console.log('\n[10] 分片搜索：小切片续搜、时限与取消');
   assert('无子可动结果为 null', sm.getResult(), null);
 })();
 
+console.log('\n[11] 置换表：同等深度更少节点、结果不变');
+(function () {
+  // 中局固定局面（从初始局面走六手得到，不凭空写 FEN）
+  function midgame() {
+    var p = new Position();
+    var uu = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
+    [[54, 45], [31, 40], [64, 63], [19, 28], [72, 71], [11, 21]].forEach(function (mv) {
+      p.makeMove(mv[0], mv[1], uu);
+    });
+    return p;
+  }
+  var opt = { level: 'master', moveNumber: 999, useBook: false, deterministic: true, depth: 6 };
+
+  var withTT = AI.findBestMove(midgame(), opt);
+  var noTT = AI.findBestMove(midgame(), Object.assign({ noTT: true }, opt));
+
+  truthy('置换表确有命中', withTT.ttHits > 0);
+  truthy('同深度节点数下降（实测约 -36%）', withTT.nodes < noTT.nodes);
+  assert('走法不因置换表改变', withTT.move, noTT.move);
+  assert('分值不因置换表改变', withTT.score, noTT.score);
+  console.log('        depth 6：节点 ' + noTT.nodes + ' → ' + withTT.nodes +
+    '（-' + (100 * (1 - withTT.nodes / noTT.nodes)).toFixed(1) + '%），命中 ' + withTT.ttHits + ' 次');
+
+  // 分片搜索同样走置换表，且与同步结果一致
+  // （切片用 500ms：小切片下根走法是否片内搜完取决于机器 timings，
+  //   中断走法会沿用上一层旧分，属分片语义本身，不在此断言——见 [9] 的说明）
+  var sliced = AI.runSearch(midgame(), opt, 500);
+  truthy('分片搜索置换表命中', sliced && sliced.ttHits > 0);
+  assert('分片/同步走法一致', sliced.move, withTT.move);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

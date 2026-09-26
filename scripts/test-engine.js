@@ -110,6 +110,7 @@ console.log('\n[3] 走子/撤销可逆性');
 (function () {
   var pos = new Position();
   var fenBefore = pos.toFen();
+  var hashBefore = pos.hash;
   var stack = [];
   MG.genLegalMovesInPlace(pos, pos.side, stack, false, filterUndo);
   var undo = undoPool[0];
@@ -120,6 +121,7 @@ console.log('\n[3] 走子/撤销可逆性');
     if (pos.toFen() !== fenBefore) { ok = false; break; }
   }
   assert('全部 ' + stack.length + ' 个走法 make/unmake 后局面还原', ok, true);
+  assert('make/unmake 后哈希还原', pos.hash, hashBefore);
 })();
 
 console.log('\n[4] 将帅照面');
@@ -260,6 +262,46 @@ console.log('\n[9] isMoveLegal 校验（初始局面）');
   assert('不可原地不动', MG.isMoveLegal(pos, C.RED, C.idxOf(7, 7), C.idxOf(7, 7)), false);
   assert('越界索引非法', MG.isMoveLegal(pos, C.RED, C.idxOf(7, 7), 999), false);
   assert('马不可走直线', MG.isMoveLegal(pos, C.RED, C.idxOf(7, 9), C.idxOf(7, 8)), false);
+})();
+
+console.log('\n[10] Zobrist 哈希：增量维护与全量重算一致');
+(function () {
+  // 确定性伪随机走 60 手，每手后比对增量哈希与全量重算；再逐手撤销比对
+  var pos = new Position();
+  var startHash = pos.hash;
+  var undo = undoPool[1];
+  var history = [];
+  var steps = 0;
+  var ok = true;
+  for (var i = 0; i < 60; i++) {
+    var moves = MG.genLegalMoves(pos, pos.side);
+    if (!moves.length) break;
+    var m = moves[(i * 37) % moves.length];
+    pos.makeMove(MG.moveFrom(m), MG.moveTo(m), undo);
+    history.push({ from: undo.from, to: undo.to, piece: undo.piece, captured: undo.captured, side: undo.side });
+    steps++;
+    if (pos.hash !== Position.computeHash(pos.board, pos.side)) { ok = false; break; }
+  }
+  assert('走 ' + steps + ' 手增量哈希始终等于全量重算', ok, true);
+
+  var backOk = true;
+  while (history.length) {
+    pos.unmakeMove(history.pop());
+    if (pos.hash !== Position.computeHash(pos.board, pos.side)) { backOk = false; break; }
+  }
+  assert('逐手撤销后增量哈希始终等于全量重算', backOk, true);
+  assert('撤销到底哈希回到开局值', pos.hash, startHash);
+
+  // 同局面同键：分别构造的相同局面哈希相等；换手/动子后必不同
+  var a = new Position();
+  var b = new Position(C.START_FEN);
+  assert('相同初始局面哈希相等', a.hash, b.hash);
+  var flipped = new Position(C.START_FEN.replace(' w ', ' b '));
+  assert('换手后哈希不同', a.hash !== flipped.hash, true);
+
+  // clone 携带哈希
+  var cl = a.clone();
+  assert('clone 复制哈希', cl.hash, a.hash);
 })();
 
 console.log('\n----------------------------------------');

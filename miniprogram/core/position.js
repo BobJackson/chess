@@ -6,6 +6,41 @@
 
 var C = require('./constants.js');
 
+// ---------------------------------------------------------------------------
+// Zobrist 哈希（置换表的键）
+//
+// piece 编码 -7..7 映射到下标 0..14（7 即空位，不用）；sideKey 在黑方走子时异或。
+// 随机表用固定种子的 mulberry32 生成——测试因此可复现，且与运行环境无关。
+// makeMove/unmakeMove 以异或增量维护 this.hash，O(1) 成本换置换表的可能。
+// ---------------------------------------------------------------------------
+var ZOBRIST = (function () {
+  var seed = 0x9E3779B9;
+  function rnd() {
+    seed = (seed + 0x6D2B79F5) | 0;
+    var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return t ^ (t >>> 14);
+  }
+  var piece = [];
+  for (var p = 0; p < 15; p++) {
+    var row = [];
+    for (var i = 0; i < C.BOARD_SIZE; i++) row.push(rnd());
+    piece.push(row);
+  }
+  return { piece: piece, side: rnd() };
+})();
+
+/** 由棋盘与走子方全量重算哈希（set 用 / 测试校验增量维护是否正确） */
+function computeHash(board, side) {
+  var h = 0;
+  for (var i = 0; i < C.BOARD_SIZE; i++) {
+    var p = board[i];
+    if (p !== C.EMPTY) h ^= ZOBRIST.piece[p + 7][i];
+  }
+  if (side === C.BLACK) h ^= ZOBRIST.side;
+  return h | 0;
+}
+
 /**
  * @constructor
  * @param {string} [fen] 省略则使用初始局面
@@ -46,6 +81,7 @@ Position.prototype.set = function (fen) {
 
   this.board = board;
   this.side = parts.length > 1 && parts[1] === 'b' ? C.BLACK : C.RED;
+  this.hash = computeHash(this.board, this.side);
   this.rebuildKingPos();
   return this;
 };
@@ -87,6 +123,7 @@ Position.prototype.clone = function () {
   p.side = this.side;
   p.kingPos = [this.kingPos[0], this.kingPos[1]];
   p.moveCount = this.moveCount;
+  p.hash = this.hash;
   return p;
 };
 
@@ -122,6 +159,11 @@ Position.prototype.makeMove = function (from, to, undo) {
   board[to] = piece;
   board[from] = C.EMPTY;
 
+  // 哈希增量：动子离开 from、落到 to，被吃子离开 to，走子方换手
+  var h = this.hash ^ ZOBRIST.piece[piece + 7][from] ^ ZOBRIST.piece[piece + 7][to];
+  if (captured !== C.EMPTY) h ^= ZOBRIST.piece[captured + 7][to];
+  this.hash = (h ^ ZOBRIST.side) | 0;
+
   if (piece === C.R_KING) this.kingPos[C.RED] = to;
   else if (piece === C.B_KING) this.kingPos[C.BLACK] = to;
   else if (captured === C.R_KING) this.kingPos[C.RED] = -1;
@@ -139,6 +181,11 @@ Position.prototype.unmakeMove = function (undo) {
   var board = this.board;
   board[undo.from] = undo.piece;
   board[undo.to] = undo.captured;
+
+  // 异或自逆：把 makeMove 的三组异或原样再来一遍即还原
+  var h = this.hash ^ ZOBRIST.piece[undo.piece + 7][undo.from] ^ ZOBRIST.piece[undo.piece + 7][undo.to];
+  if (undo.captured !== C.EMPTY) h ^= ZOBRIST.piece[undo.captured + 7][undo.to];
+  this.hash = (h ^ ZOBRIST.side) | 0;
 
   if (undo.piece === C.R_KING) this.kingPos[C.RED] = undo.from;
   else if (undo.piece === C.B_KING) this.kingPos[C.BLACK] = undo.from;
@@ -178,3 +225,5 @@ Position.prototype.countPieces = function (side) {
 };
 
 module.exports = Position;
+module.exports.ZOBRIST = ZOBRIST;
+module.exports.computeHash = computeHash;

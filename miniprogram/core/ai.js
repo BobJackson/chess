@@ -2,6 +2,7 @@
  * AI 搜索引擎
  *
  * 采用：迭代加深 + Negamax Alpha-Beta 剪枝 + 静态搜索(Quiescence)
+ *       + 置换表(Transposition Table, Zobrist 哈希)
  *       + 杀手走法(Killer Move) + 历史启发(History Heuristic) + MVV-LVA 排序
  *
  * 中国象棋规则中"无子可动"（将死与困毙）均判负，因此搜索里
@@ -21,6 +22,20 @@ var MAX_QPLY = 14;
 /** 主搜索中只对分值最高的前 ORDER_K 个走法做选择排序，其余保持生成顺序 */
 var ORDER_K = 12;
 var CAPTURE_ORDER_K = 8;
+
+// ---------------------------------------------------------------------------
+// 置换表：固定 2^16 槽的扁平 typed-array 表，键为 Position 的 Zobrist 哈希
+//
+// 旗标语义：EXACT 精确值 / LOWER 下界（截断）/ UPPER 上界（未抬升 alpha）。
+// 杀棋分存表时按 ply 调整（与走子方无关的绝对距离），取出时还原。
+// 替换策略：深度优先——浅层结果不覆盖同槽的深层结果。
+// ---------------------------------------------------------------------------
+var TT_BITS = 16;
+var TT_SIZE = 1 << TT_BITS;
+var TT_MASK = TT_SIZE - 1;
+var TT_EXACT = 1;
+var TT_LOWER = 2;
+var TT_UPPER = 3;
 
 /**
  * 难度配置
@@ -81,6 +96,9 @@ function createContext() {
   var bestAtPly = [];
   for (i = 0; i < MAX_PLY + MAX_QPLY + 4; i++) bestAtPly.push(0);
 
+  var hashMove = [];
+  for (i = 0; i < MAX_PLY + MAX_QPLY + 4; i++) hashMove.push(0);
+
   return {
     undoPool: Position.createUndoPool(MAX_PLY + MAX_QPLY + 8),
     filterUndo: { from: 0, to: 0, piece: 0, captured: 0, side: 0 },
@@ -90,6 +108,16 @@ function createContext() {
     killers: killers,
     history: history,
     bestAtPly: bestAtPly,
+    // 置换表命中的走法（按 ply），排序优先级高于 PV 走法
+    hashMove: hashMove,
+    // 置换表本体：五条平行 typed-array，ttFlag 为 0 即空槽
+    ttKey: new Int32Array(TT_SIZE),
+    ttMove: new Int32Array(TT_SIZE),
+    ttScore: new Int32Array(TT_SIZE),
+    ttDepth: new Uint8Array(TT_SIZE),
+    ttFlag: new Uint8Array(TT_SIZE),
+    ttHits: 0,
+    noTT: false,
     nodes: 0,
     deadline: 0,
     aborted: false
@@ -100,6 +128,9 @@ function resetContext(ctx, deadline) {
   for (var i = 0; i < ctx.bestAtPly.length; i++) ctx.bestAtPly[i] = 0;
   for (i = 0; i < ctx.killers.length; i++) { ctx.killers[i][0] = 0; ctx.killers[i][1] = 0; }
   for (i = 0; i < ctx.history.length; i++) ctx.history[i] = 0;
+  for (i = 0; i < ctx.hashMove.length; i++) ctx.hashMove[i] = 0;
+  ctx.ttFlag.fill(0);   // 键/分/深度随旗标归零即失效，无需逐个清
+  ctx.ttHits = 0;
   ctx.moveStack.length = 0;
   ctx.scoreStack.length = 0;
   ctx.nodes = 0;
@@ -116,9 +147,10 @@ function recordKiller(ctx, ply, move) {
 }
 
 /**
- * 走法排序分值：PV 走法 > 吃子(MVV-LVA) > 杀手走法 > 历史启发+位置增益
+ * 走法排序分值：置换表走法 > PV 走法 > 吃子(MVV-LVA) > 杀手走法 > 历史启发+位置增益
  */
 function moveScore(pos, move, ply, ctx) {
+  if (ctx.hashMove[ply] === move) return 3000000;
   if (ctx.bestAtPly[ply] === move) return 2000000;
 
   var from = MG.moveFrom(move);
@@ -224,6 +256,20 @@ function quiesce(pos, alpha, beta, ply, qply, ctx) {
 // Negamax + Alpha-Beta
 // ---------------------------------------------------------------------------
 
+/** 杀棋分存表前把「离根的 ply」折算进去，使分值与读取时的节点无关 */
+function ttWriteScore(score, ply) {
+  if (score > MATE - 1000) return score + ply;
+  if (score < -MATE + 1000) return score - ply;
+  return score;
+}
+
+/** 读取时按当前 ply 还原杀棋距离 */
+function ttReadScore(score, ply) {
+  if (score > MATE - 1000) return score - ply;
+  if (score < -MATE + 1000) return score + ply;
+  return score;
+}
+
 function negamax(pos, depth, alpha, beta, ply, ctx) {
   ctx.nodes++;
   if ((ctx.nodes & 255) === 0 && Date.now() > ctx.deadline) ctx.aborted = true;
@@ -231,6 +277,24 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
 
   if (depth <= 0 || ply >= MAX_PLY) {
     return quiesce(pos, alpha, beta, ply, 0, ctx);
+  }
+
+  // 置换表探测：层数足够时按旗标直接取值；不足也借它的走法排序
+  var hash = pos.hash;
+  var ttIdx = hash & TT_MASK;
+  if (!ctx.noTT && ctx.ttFlag[ttIdx] !== 0 && ctx.ttKey[ttIdx] === hash) {
+    var tMove = ctx.ttMove[ttIdx];
+    ctx.hashMove[ply] = tMove;
+    if (ctx.ttDepth[ttIdx] >= depth) {
+      var tFlag = ctx.ttFlag[ttIdx];
+      var tScore = ttReadScore(ctx.ttScore[ttIdx], ply);
+      ctx.ttHits++;
+      if (tFlag === TT_EXACT) return tScore;
+      if (tFlag === TT_LOWER && tScore >= beta) return tScore;
+      if (tFlag === TT_UPPER && tScore <= alpha) return tScore;
+    }
+  } else {
+    ctx.hashMove[ply] = 0;
   }
 
   var stack = ctx.moveStack;
@@ -277,6 +341,16 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
   }
 
   stack.length = start;
+
+  // 存表：被中断的结果不可靠，不存；浅层结果不覆盖同槽深层结果
+  if (!ctx.aborted && !ctx.noTT &&
+      (ctx.ttFlag[ttIdx] === 0 || depth >= ctx.ttDepth[ttIdx])) {
+    ctx.ttKey[ttIdx] = hash;
+    ctx.ttMove[ttIdx] = bestMove;
+    ctx.ttScore[ttIdx] = ttWriteScore(best, ply);
+    ctx.ttDepth[ttIdx] = depth;
+    ctx.ttFlag[ttIdx] = best <= alphaAtEntry ? TT_UPPER : (best >= beta ? TT_LOWER : TT_EXACT);
+  }
 
   if (!ctx.aborted && best > alphaAtEntry) {
     ctx.bestAtPly[ply] = bestMove;
@@ -338,6 +412,7 @@ function searchRoot(pos, depth, exact, ctx) {
  *        moveNumber 为该方已经走过的步数，用于判断是否处于开局阶段
  *        deterministic 为 true 时关闭时间截止与全部随机化，结果可复现（供测试/回放）
  *        depth 覆盖难度的最大搜索深度，0/省略表示用难度自带值
+ *        noTT 为 true 时关闭置换表（供对照测试）
  * @returns {?{move:number, from:number, to:number, score:number, depth:number,
  *              nodes:number, time:number, mateIn:number, blunder:boolean}}
  */
@@ -349,6 +424,7 @@ function findBestMove(pos, options) {
   var maxDepth = options.depth || level.depth;
   var startTime = Date.now();
   var ctx = createContext();
+  ctx.noTT = !!options.noTT;
   resetContext(ctx, deterministic ? Infinity : startTime + Math.max(100, level.time));
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
@@ -447,6 +523,7 @@ function findBestMove(pos, options) {
     score: bestScore,
     depth: completedDepth,
     nodes: ctx.nodes,
+    ttHits: ctx.ttHits,
     time: elapsed,
     mateIn: mateIn,
     blunder: false,
@@ -568,6 +645,7 @@ function createSearch(pos, options) {
   var startTime = Date.now();
   var totalDeadline = deterministic ? Infinity : startTime + Math.max(100, level.time);
   var ctx = createContext();
+  ctx.noTT = !!options.noTT;
   resetContext(ctx, totalDeadline);
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
@@ -734,6 +812,7 @@ function createSearch(pos, options) {
       score: bestScore,
       depth: st.completedDepth,
       nodes: ctx.nodes,
+      ttHits: ctx.ttHits,
       time: Date.now() - startTime,
       mateIn: mateIn,
       blunder: false,

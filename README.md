@@ -149,6 +149,10 @@ docker compose up -d
 
 高难度（困难 6 层 / 大师 8 层）的搜索不再整段阻塞主线程。`core/ai.js` 在同步 `findBestMove` 之外提供 `createSearch`：同一套迭代加深 + Alpha-Beta，但拆成「每次一个根走法」的小步，每片最多 12ms（`scenes/board.js` 的 `AI_SLICE_MS`）就让出主线程渲染「AI 思考中…」，下一帧接着搜。单个根走法在片内搜不完时沿用上一层迭代的分值，保证每层必然收尾。实测大师档中局：旧版整段冻结约 4.5s，分片后单片最长约 13ms（一帧预算内）。「提示」按钮同样走分片。AI 思考中悔棋 = 取消 AI 并撤回刚走的一手；重开/离场自动取消未完成的搜索。
 
+## AI 置换表（TT）
+
+`core/position.js` 用 Zobrist 随机表在 `makeMove/unmakeMove` 里 O(1) 增量维护 `pos.hash`；`core/ai.js` 的搜索上下文持一张 2^16 槽的置换表（EXACT/LOWER/UPPER 三旗标、杀棋分按 ply 折算、深度优先替换），命中走法还参与排序（优先级高于 PV 走法）。效果：同等深度节点数大降（中局 depth 6 约 -36%、depth 8 约 -52%），相同时间内大师档可多搜近一层；走法与分值与无 TT 完全一致（有对照测试）。选项 `noTT: true` 可关闭置换表供对照。
+
 ## 复盘回放
 
 终局落款新增「复盘」按钮，进入独立复盘场景（`scenes/replay.js`）：从开局起按记谱逐手重放本盘棋。
@@ -299,9 +303,9 @@ docker compose up -d
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 1400 项
-npm run test:engine      # 引擎 64
-npm run test:ai          # AI 40（含分片搜索与同步搜索的确定性一致）
+npm test                 # 串联全部，当前 1413 项
+npm run test:engine      # 引擎 71（含 Zobrist 哈希增量一致性）
+npm run test:ai          # AI 46（含分片/同步确定性一致、置换表增益对照）
 npm run test:game        # 对局 143（含送将提示文案：牵制/解将/围死）
 npm run test:ledger      # 松桂账本 52（含逐局历史/连胜/上限/旧账兼容）
 npm run test:mate        # 杀法识别 161
