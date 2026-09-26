@@ -143,7 +143,6 @@ function createMenuScene(app) {
 
     W.fillBackground(ctx, w, h);
     W.drawText(ctx, '松风桂月', w / 2, h * 0.14, 32, W.THEME.title, 'center', true);
-    W.drawText(ctx, '人机对战 · 本地双人 · 好友联机', w / 2, h * 0.14 + 30, 13, W.THEME.subtitle, 'center');
 
     if (app.ledger) drawLedger(ctx, w, h * 0.14 + 60, app);
 
@@ -154,8 +153,6 @@ function createMenuScene(app) {
     for (var i = 0; i < scene.buttons.length; i++) {
       W.drawButton(ctx, scene.buttons[i], scene.pressed === scene.buttons[i].id);
     }
-
-    W.drawText(ctx, '人机与本地双人纯本地运行 · 联机需云开发', w / 2, h - 24, 11, W.THEME.subtitle, 'center');
 
     // 桂花落在最上层（极淡，像从屏前飘过）
     scene.fx.draw(ctx);
