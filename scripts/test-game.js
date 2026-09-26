@@ -448,6 +448,71 @@ console.log('\n[16] parseText 反解析');
   assert('空文本返回 null', NT.parseText(pos, '', legal), null);
 })();
 
+console.log('\n[17] 送将提示：classifyMove 与新手引导文案');
+(function () {
+  // 黑马 idx40 (f4,r4) 替黑将挡红车：动马即送将，但马一个合法落点都没有
+  var PIN_FEN = '4k4/9/9/9/4n4/9/9/9/9/3KR4 b - - 0 1';
+  var KNIGHT = C.idxOf(4, 4);          // 黑马
+  var SELFCHECK_TO = C.idxOf(3, 2);    // 马的伪合法落点（走后将帅被车照）
+  var RULE_BAD_TO = C.idxOf(5, 4);     // 横着走一格，马根本没有这种走法
+
+  var g = new Game(PIN_FEN);
+  assert('牵制局面下黑方未被将', g.isChecked(), false);
+  assert('被牵制的马无合法落点', g.legalTargets(KNIGHT).length, 0);
+
+  // classifyMove 三分：合法 / 送将 / 违反走法
+  assert('送将走法归类 SELFCHECK',
+    MG.classifyMove(g.pos, C.BLACK, KNIGHT, SELFCHECK_TO), MG.MOVE_SELFCHECK);
+  assert('违反走法归类 INVALID',
+    MG.classifyMove(g.pos, C.BLACK, KNIGHT, RULE_BAD_TO), MG.MOVE_INVALID);
+  assert('isMoveLegal 与 classify 一致（送将）',
+    MG.isMoveLegal(g.pos, C.BLACK, KNIGHT, SELFCHECK_TO), false);
+  var gOk = new Game();
+  assert('正常走法归类 LEGAL',
+    MG.classifyMove(gOk.pos, C.RED, C.idxOf(2, 6), C.idxOf(2, 5)), MG.MOVE_LEGAL);
+
+  // move 的报错文案分场景
+  var r = g.move(KNIGHT, SELFCHECK_TO);
+  assert('送将走法被拒', r.ok, false);
+  assert('黑方送将提示「将」', r.error, '移动将送将');
+  var rBad = g.move(KNIGHT, RULE_BAD_TO);
+  assert('违反走法仍报不符合走法', rBad.error, '不符合走法');
+
+  // blockReason：选中无落点的子时给新手的解释
+  assert('被牵制（黑方）', g.blockReason(KNIGHT), '移动将送将');
+  assert('有落点的子返回 null', new Game().blockReason(C.idxOf(2, 6)), null);
+  assert('空位返回 null', g.blockReason(C.idxOf(0, 5)), null);
+  assert('对方子返回 null', g.blockReason(C.idxOf(4, 9)), null);
+
+  // 红方对称：送的是「帅」
+  var gRed = new Game('3kr4/9/9/9/9/4N4/9/9/9/4K4 w - - 0 1');
+  assert('被牵制（红方）', gRed.blockReason(C.idxOf(4, 5)), '移动将送帅');
+  var rRed = gRed.move(C.idxOf(4, 5), C.idxOf(3, 3));
+  assert('红方送将提示「帅」', rRed.error, '移动将送帅');
+
+  // 正被将军时：走别的子不是送将，是「不能解将」
+  var CHK_FEN = '4k4/9/9/9/9/4R4/9/9/9/c2K5 b - - 0 1';
+  var gChk = new Game(CHK_FEN);
+  assert('将军局面确认', gChk.isChecked(), true);
+  assert('无法解将的子', gChk.blockReason(C.idxOf(0, 9)), '此子无法解将');
+  assert('无法解将的着', gChk.blockedMoveReason(C.idxOf(0, 9), C.idxOf(1, 9)), '此着不能解将');
+  var rChk = gChk.move(C.idxOf(0, 9), C.idxOf(1, 9));
+  assert('move 同样报不能解将', rChk.error, '此着不能解将');
+  assert('能解将的子不提示', gChk.blockReason(C.idxOf(4, 0)), null);
+
+  // 被围死（无伪走法）：另一种解释
+  var BOX_FEN = '4k4/9/9/9/9/9/9/9/P8/RN2K4 w - - 0 1';
+  var gBox = new Game(BOX_FEN);
+  assert('被围死的车无落点', gBox.legalTargets(C.idxOf(0, 9)).length, 0);
+  assert('被围死提示暂无去路', gBox.blockReason(C.idxOf(0, 9)), '此子暂无去路');
+
+  // blockedMoveReason 只在「送将」时给文案，其余静默（点空白=取消选中不该弹提示）
+  assert('送将着给文案', g.blockedMoveReason(KNIGHT, SELFCHECK_TO), '移动将送将');
+  assert('违反走法的着静默', g.blockedMoveReason(KNIGHT, RULE_BAD_TO), null);
+  assert('合法着静默', new Game().blockedMoveReason(C.idxOf(2, 6), C.idxOf(2, 5)), null);
+  assert('出界静默', g.blockedMoveReason(KNIGHT, -1), null);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

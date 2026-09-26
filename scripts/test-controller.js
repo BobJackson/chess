@@ -727,6 +727,63 @@ console.log('\n[16] 被威胁的棋子：当前走棋方的子中，对方能吃
   });
 })();
 
+console.log('\n[17] 送将提示：被牵制子的新手引导');
+(function () {
+  // 黑马 idx40 (f4,r4) 替黑将挡红车：动它即送将，一个合法落点都没有
+  var PIN_FEN = '4k4/9/9/9/4n4/9/9/9/9/3KR4 b - - 0 1';
+  var KNIGHT = C.idxOf(4, 4);
+  var SELFCHECK_TO = C.idxOf(3, 2);   // 马的伪合法落点（走后黑将被车照）
+  var RULE_BAD_TO = C.idxOf(5, 4);    // 马走不到这，纯无效点
+
+  // 17.1 选中被牵制的子：立即提示原因
+  var s = mkController({ fen: PIN_FEN });
+  s.ctrl.select(KNIGHT);
+  assert('选中后仍无落点', s.ctrl.targets.length, 0);
+  assert('选中即提示一次', s.log.illegal, 1);
+  assert('提示文案为送将', s.log.lastIllegal, '移动将送将');
+  assert('选中状态保留', s.ctrl.selected, KNIGHT);
+
+  // 17.2 选中有落点的子：不提示
+  var ok = mkController();
+  ok.ctrl.select(PAWN);
+  assert('正常选中不提示', ok.log.illegal, 0);
+
+  // 17.3 点选第二步落在「送将格」：提示且取消选中
+  var t = mkController({ fen: PIN_FEN });
+  var kp = at(t.layout, KNIGHT);
+  var sp = at(t.layout, SELFCHECK_TO);
+  t.ctrl.touchStart(kp.x, kp.y);              // 选中（提示第 1 次）
+  assert('点选被牵制子提示', t.log.illegal, 1);
+  t.ctrl.touchEnd(kp.x, kp.y);                // 原地抬手：保留选中，等待第二步
+  t.ctrl.touchStart(sp.x, sp.y);              // 尝试落到送将格
+  assert('落送将格再提示一次', t.log.illegal, 2);
+  assert('提示仍是送将', t.log.lastIllegal, '移动将送将');
+  assert('尝试后取消选中', t.ctrl.selected, -1);
+  assert('未走子仍轮黑方', t.game.pos.side, C.BLACK);
+
+  // 17.4 点选第二步落在「纯无效格」：静默取消（不该打扰）
+  var q = mkController({ fen: PIN_FEN });
+  var qp = at(q.layout, RULE_BAD_TO);
+  q.ctrl.select(KNIGHT);                      // 提示第 1 次（选中即提示）
+  q.ctrl.touchStart(qp.x, qp.y);
+  assert('无效格不再追加提示', q.log.illegal, 1);
+  assert('无效格取消选中', q.ctrl.selected, -1);
+
+  // 17.5 拖拽到送将格：提示且保留选中（方便改点）
+  var d = mkController({ fen: PIN_FEN });
+  var dk = at(d.layout, KNIGHT);
+  var ds = at(d.layout, SELFCHECK_TO);
+  d.ctrl.touchStart(dk.x, dk.y);              // 选中（提示第 1 次）
+  d.ctrl.touchMove(ds.x, ds.y);
+  assert('拖拽已标记', d.ctrl.drag.moved, true);
+  assert('送将格悬停不高亮', d.ctrl.drag.hover, -1);
+  d.ctrl.touchEnd(ds.x, ds.y);
+  assert('拖拽送将再提示一次', d.log.illegal, 2);
+  assert('拖拽提示文案', d.log.lastIllegal, '移动将送将');
+  assert('拖拽送将保留选中', d.ctrl.selected, KNIGHT);
+  assert('拖拽未走子', d.game.pos.side, C.BLACK);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

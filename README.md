@@ -299,15 +299,15 @@ docker compose up -d
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 1356 项
+npm test                 # 串联全部，当前 1400 项
 npm run test:engine      # 引擎 64
 npm run test:ai          # AI 40（含分片搜索与同步搜索的确定性一致）
-npm run test:game        # 对局 117
+npm run test:game        # 对局 143（含送将提示文案：牵制/解将/围死）
 npm run test:ledger      # 松桂账本 52（含逐局历史/连胜/上限/旧账兼容）
 npm run test:mate        # 杀法识别 161
 npm run test:ui          # 布局/渲染 168（含走子抛物线与吃子击飞）
 npm run test:particles   # 粒子系统 25
-npm run test:controller  # 触摸状态机 249
+npm run test:controller  # 触摸状态机 267（含被牵制子的选中/点选/拖拽提示）
 npm run test:endgame     # 绝杀演出 137（含动作层：炮弹/马跃/车冲/将震颤）
 npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21

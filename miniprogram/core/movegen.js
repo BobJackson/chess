@@ -294,29 +294,46 @@ function hasLegalMove(pos, side) {
   return moves.length > 0;
 }
 
-/**
- * 校验一步棋是否合法（用于联机时校验对手/自己提交的走法）
- * @returns {boolean}
- */
-function isMoveLegal(pos, side, from, to) {
-  if (from < 0 || from >= C.BOARD_SIZE || to < 0 || to >= C.BOARD_SIZE) return false;
-  if (from === to) return false;
-  var piece = pos.board[from];
-  if (piece === C.EMPTY) return false;
-  if (C.sideOf(piece) !== side) return false;
-  if (pos.board[to] !== C.EMPTY && C.sideOf(pos.board[to]) === side) return false;
+/** classifyMove 的判定结果：合法 / 走后己方被将（送将或未解将）/ 违反走法规则 */
+var MOVE_LEGAL = 0;
+var MOVE_SELFCHECK = 1;
+var MOVE_INVALID = 2;
 
-  // 该走法必须能在伪合法列表中找到，且走完后己方不被将
+/**
+ * 判定一步棋的合法性类别
+ *
+ * isMoveLegal 只回答「能不能走」，本函数多回答一句「为什么不能」——
+ * UI 据此给新手分场景提示：MOVE_SELFCHECK 是「移动将送将（帅）」，
+ * MOVE_INVALID 才是「不符合走法」。
+ *
+ * @returns {number} MOVE_LEGAL / MOVE_SELFCHECK / MOVE_INVALID
+ */
+function classifyMove(pos, side, from, to) {
+  if (from < 0 || from >= C.BOARD_SIZE || to < 0 || to >= C.BOARD_SIZE) return MOVE_INVALID;
+  if (from === to) return MOVE_INVALID;
+  var piece = pos.board[from];
+  if (piece === C.EMPTY) return MOVE_INVALID;
+  if (C.sideOf(piece) !== side) return MOVE_INVALID;
+  if (pos.board[to] !== C.EMPTY && C.sideOf(pos.board[to]) === side) return MOVE_INVALID;
+
+  // 该走法必须能在伪合法列表中找到；能找到但走完后己方被将，才是「送将」
   var probe = [];
   genPseudoMoves(pos, side, probe, false);
-  var packed = packMove(from, to);
-  if (probe.indexOf(packed) < 0) return false;
+  if (probe.indexOf(packMove(from, to)) < 0) return MOVE_INVALID;
 
   var undo = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
   pos.makeMove(from, to, undo);
   var legal = !isChecked(pos, side);
   pos.unmakeMove(undo);
-  return legal;
+  return legal ? MOVE_LEGAL : MOVE_SELFCHECK;
+}
+
+/**
+ * 校验一步棋是否合法（用于联机时校验对手/自己提交的走法）
+ * @returns {boolean}
+ */
+function isMoveLegal(pos, side, from, to) {
+  return classifyMove(pos, side, from, to) === MOVE_LEGAL;
 }
 
 module.exports = {
@@ -329,5 +346,9 @@ module.exports = {
   isChecked: isChecked,
   kingsAreFacing: kingsAreFacing,
   hasLegalMove: hasLegalMove,
-  isMoveLegal: isMoveLegal
+  isMoveLegal: isMoveLegal,
+  classifyMove: classifyMove,
+  MOVE_LEGAL: MOVE_LEGAL,
+  MOVE_SELFCHECK: MOVE_SELFCHECK,
+  MOVE_INVALID: MOVE_INVALID
 };

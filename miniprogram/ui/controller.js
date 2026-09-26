@@ -143,6 +143,12 @@ Controller.prototype.clearSelection = function () {
 Controller.prototype.select = function (idx) {
   this.selected = idx;
   this.targets = this.game.legalTargets(idx);
+  // 一个落点都没有：对新手解释原因（被牵制送将 / 被围死），
+  // 否则光秃秃没有落点提示，看起来像棋子坏了
+  if (this.targets.length === 0 && this.options.onIllegal && this.game.blockReason) {
+    var why = this.game.blockReason(idx);
+    if (why) this.options.onIllegal(why);
+  }
   if (this.options.onSelect) this.options.onSelect(idx, this.targets);
   return this.targets;
 };
@@ -304,8 +310,14 @@ Controller.prototype.touchStart = function (x, y) {
     return changed || this.targets.length > 0;
   }
 
-  // 3) 点在空位或敌子上：取消选中
+  // 3) 点在空位或敌子上：取消选中；
+  //    但若落点构成一步「送将」的棋（伪合法），说明玩家是真想走这步，
+  //    值得提示一句为什么走不得，而不是静默取消
   var hadSelection = this.selected >= 0;
+  if (hadSelection && this.options.onIllegal && this.game.blockedMoveReason) {
+    var why = this.game.blockedMoveReason(this.selected, idx);
+    if (why) this.options.onIllegal(why);
+  }
   this.clearSelection();
   return hadSelection;
 };
@@ -342,7 +354,12 @@ Controller.prototype.touchEnd = function (x, y) {
     this.requestMove(drag.from, idx);
     return true;
   }
-  // 拖到非法位置：棋子回位但保持选中，方便改点
+  // 拖到非法位置：棋子回位但保持选中，方便改点；
+  // 落点构成「送将」的棋时给一句原因，让新手明白不是棋子拖不动
+  if (this.options.onIllegal && this.game.blockedMoveReason) {
+    var why = this.game.blockedMoveReason(drag.from, idx);
+    if (why) this.options.onIllegal(why);
+  }
   return true;
 };
 

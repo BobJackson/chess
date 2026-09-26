@@ -83,8 +83,9 @@ Game.prototype.move = function (from, to) {
   if (this.result) {
     return { ok: false, error: '对局已结束' };
   }
-  if (!MG.isMoveLegal(this.pos, this.pos.side, from, to)) {
-    return { ok: false, error: '不符合走法' };
+  var cls = MG.classifyMove(this.pos, this.pos.side, from, to);
+  if (cls !== MG.MOVE_LEGAL) {
+    return { ok: false, error: cls === MG.MOVE_SELFCHECK ? this.selfCheckText('move') : '不符合走法' };
   }
 
   var side = this.pos.side;
@@ -157,6 +158,57 @@ Game.prototype.legalTargets = function (from) {
 /** 当前走子方是否被将军 */
 Game.prototype.isChecked = function () {
   return MG.isChecked(this.pos, this.pos.side);
+};
+
+/**
+ * 「走后己方被将」的提示文案（对新手解释为什么这步走不得）
+ *
+ * 分红黑：红方送的是帅，黑方送的是将；
+ * 分场景：正被将军时走别的子是「不能解将」，平时才是「送将」。
+ *
+ * @param {string} kind 'move'（走出这一步）| 'piece'（这枚棋子）
+ */
+Game.prototype.selfCheckText = function (kind) {
+  if (this.isChecked()) return kind === 'piece' ? '此子无法解将' : '此着不能解将';
+  // 分红黑：红方送的是帅，黑方送的是将
+  return '移动将送' + (this.pos.side === C.RED ? '帅' : '将');
+};
+
+/**
+ * 解释「这一步为什么走不得」：仅当伪合法但会送将时给出文案，
+ * 其余（违反走法规则、出界等）返回 null——点击空白处本就该静默取消选中，
+ * 只有「明显是一步棋、却送将」才值得弹提示。
+ *
+ * @returns {?string} 提示文案；非送将情形为 null
+ */
+Game.prototype.blockedMoveReason = function (from, to) {
+  if (this.result) return null;
+  var cls = MG.classifyMove(this.pos, this.pos.side, from, to);
+  return cls === MG.MOVE_SELFCHECK ? this.selfCheckText('move') : null;
+};
+
+/**
+ * 解释「这枚棋子为什么一个落点都没有」
+ *
+ * 选中一枚被牵制的子（如替将/帅挡枪的炮）时给新手一句解释，
+ * 否则棋盘上光秃秃没有落点，看起来像棋子坏了。
+ *
+ * @param {number} from 棋子索引
+ * @returns {?string} 提示文案；有合法落点或不是己方子时为 null
+ */
+Game.prototype.blockReason = function (from) {
+  if (this.result) return null;
+  var piece = this.pos.board[from];
+  if (piece === C.EMPTY || C.sideOf(piece) !== this.pos.side) return null;
+  if (this.legalTargets(from).length > 0) return null;
+
+  // 有伪合法走法却无一合法 → 被牵制（动它会送将）；一个伪走法都没有 → 被围死
+  var probe = [];
+  MG.genPseudoMoves(this.pos, this.pos.side, probe, false);
+  for (var i = 0; i < probe.length; i++) {
+    if (MG.moveFrom(probe[i]) === from) return this.selfCheckText('piece');
+  }
+  return '此子暂无去路';
 };
 
 /** 当前走子方是否还有合法走法 */
