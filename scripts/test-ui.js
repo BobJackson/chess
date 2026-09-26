@@ -837,6 +837,53 @@ console.log('\n[17] 主题色派生透明度');
   assert('主题色都能派生', /^rgba\(/.test(R.withAlpha(R.THEME.lastMove, 0.3)), true);
 })();
 
+console.log('\n[18] 主题切换：紫金夜 ↔ 松桂 往返还原');
+(function () {
+  var Themes = require('../miniprogram/ui/themes.js');
+  var Wm = require('../miniprogram/ui/widgets.js');
+  var Rm = require('../miniprogram/ui/renderer.js');
+  var Cm = require('../miniprogram/ui/chrome.js');
+
+  // 快照出厂色（松桂基线），往返后逐键深比较
+  function snapAll() {
+    return {
+      r: JSON.stringify(Rm.THEME),
+      w: JSON.stringify(Wm.THEME),
+      c: JSON.stringify(Cm.PALETTE)
+    };
+  }
+  var before = snapAll();
+
+  assert('主题清单两项', Themes.THEMES.length, 2);
+  assert('清单首项为松桂', Themes.THEMES[0].key, 'pine');
+  assert('次项为紫金夜', Themes.THEMES[1].name, '紫金夜');
+  assert('默认主题为松桂', Themes.key(), 'pine');
+
+  assert('切换紫金夜成功', Themes.setTheme('nebula'), true);
+  assert('当前主题为紫金夜', Themes.key(), 'nebula');
+  assert('棋盘格线换金', Rm.THEME.line, '#d9b878');
+  assert('选中环换紫', Rm.THEME.selected, '#9b7bff');
+  assert('棋子保持米白面', Rm.THEME.pieceFaceMid, '#fdf3d8');
+  assert('控件底色换深空', Wm.THEME.bg, '#1a1230');
+  assert('屏幕渐变首站换色', Cm.PALETTE.bgStops[0], '#1e1436');
+  assert('账本分隔线换色', Wm.THEME.divider, 'rgba(217,184,120,0.18)');
+
+  // 未知 key 静默拒绝且不改动现状
+  assert('未知主题返回 false', Themes.setTheme('nope'), false);
+  assert('主题未被改动', Themes.key(), 'nebula');
+
+  // 往返：切回松桂后三块色板与出厂快照逐键一致（无漂移）
+  assert('切回松桂成功', Themes.setTheme('pine'), true);
+  var after = snapAll();
+  assert('renderer 色板往返还原', after.r, before.r);
+  assert('widgets 色板往返还原', after.w, before.w);
+  assert('chrome 色板往返还原', after.c, before.c);
+
+  // 无 wx 环境下持久化静默跳过（不炸即为通过）
+  assert('indexOf 寻址', Themes.indexOf('nebula'), 1);
+  assert('nameOf 反查', Themes.nameOf('pine'), '松桂');
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {

@@ -18,11 +18,14 @@ var createReplay = require('./scenes/replay.js');
 var createSettings = require('./scenes/settings.js');
 var createLedger = require('./scenes/ledger.js');
 var audio = require('./ui/audio.js');
+var Themes = require('./ui/themes.js');
 var NET_CONFIG = require('./net/config.js');
 var Ledger = require('./core/ledger.js');
 var C = require('./core/constants.js');
 
 audio.init();
+// 主题要在任何场景首帧渲染之前就位（读持久化，无记录即松桂）
+Themes.init();
 
 // ---------------------------------------------------------------------------
 // 画布与尺寸

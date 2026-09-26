@@ -100,9 +100,9 @@ function createLedgerScene(app) {
     }
   };
 
-  /** 胜负的小色点：松=暖金、桂=绛红、和=灰（一眼扫胜负，与棋盘标记同色系） */
+  /** 胜负的小色点：松=暖金、桂=绛红、和=灰（一眼扫胜负，色值随主题） */
   function outcomeColor(o) {
-    return o === 'song' ? '#c98a2b' : (o === 'gui' ? '#c62030' : '#8d6e63');
+    return o === 'song' ? W.THEME.accentSong : (o === 'gui' ? W.THEME.accentGui : W.THEME.accentDraw);
   }
 
   scene.render = function (ctx, w, h) {
@@ -122,7 +122,7 @@ function createLedgerScene(app) {
     W.drawText(ctx, scene.scoreLine, cx, y, 24, W.THEME.title, 'center', true);
     W.drawText(ctx, scene.metaLine, cx, y + 22, 12, W.THEME.subtitle, 'center');
     if (scene.streakLine) {
-      W.drawText(ctx, scene.streakLine, cx, y + 42, 13, '#c98a2b', 'center', true);
+      W.drawText(ctx, scene.streakLine, cx, y + 42, 13, W.THEME.accentSong, 'center', true);
     }
 
     // 列表（裁剪 + 拖动滚动）
@@ -136,7 +136,7 @@ function createLedgerScene(app) {
       // 行分隔线（首行之上不画）
       if (i > 0) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(93,64,55,0.14)';
+        ctx.strokeStyle = W.THEME.divider;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(28, ry - 6);

@@ -14,12 +14,25 @@ var W = require('./widgets.js');
 /** layout.height / layout.width 的固定比例（由 PADDING_RATIO 决定） */
 var BOARD_ASPECT = 10.24 / 9.24;
 
+/**
+ * 屏幕装饰色板（ui/themes.js 切换主题时就地覆写这里面的值，
+ * 绘制函数每次都从 PALETTE 读取，调用点因此零改动）
+ */
+var PALETTE = {
+  bgStops: ['#f8eed9', '#f1e2c2', '#e6d2a8'],
+  panelFill: '#dcc08c',
+  panelShadow: 'rgba(93,64,55,0.28)',
+  panelStroke: 'rgba(93,64,55,0.35)',
+  ornament: 'rgba(93,64,55,0.30)',
+  watermark: '#5d4037'
+};
+
 /** 整屏纵向渐变底色，比纯色更有"桌布"质感 */
 function drawScreenBg(ctx, w, h) {
   var g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#f8eed9');
-  g.addColorStop(0.5, '#f1e2c2');
-  g.addColorStop(1, '#e6d2a8');
+  g.addColorStop(0, PALETTE.bgStops[0]);
+  g.addColorStop(0.5, PALETTE.bgStops[1]);
+  g.addColorStop(1, PALETTE.bgStops[2]);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 }
@@ -27,16 +40,16 @@ function drawScreenBg(ctx, w, h) {
 /** 棋盘衬底：一圈略大的"棋桌"面板 + 投影 + 内描边 */
 function drawPanel(ctx, x, y, w, h) {
   ctx.save();
-  ctx.shadowColor = 'rgba(93,64,55,0.28)';
+  ctx.shadowColor = PALETTE.panelShadow;
   ctx.shadowBlur = 16;
   ctx.shadowOffsetY = 5;
-  ctx.fillStyle = '#dcc08c';
+  ctx.fillStyle = PALETTE.panelFill;
   W.roundRectPath(ctx, x, y, w, h, 14);
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  ctx.strokeStyle = 'rgba(93,64,55,0.35)';
+  ctx.strokeStyle = PALETTE.panelStroke;
   ctx.lineWidth = 1;
   W.roundRectPath(ctx, x + 4, y + 4, w - 8, h - 8, 10);
   ctx.stroke();
@@ -46,8 +59,8 @@ function drawPanel(ctx, x, y, w, h) {
 /** 中式分隔饰线：两端细线 + 中心菱形 */
 function drawOrnament(ctx, cx, cy, halfW) {
   ctx.save();
-  ctx.strokeStyle = 'rgba(93,64,55,0.30)';
-  ctx.fillStyle = 'rgba(93,64,55,0.30)';
+  ctx.strokeStyle = PALETTE.ornament;
+  ctx.fillStyle = PALETTE.ornament;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(cx - halfW, cy); ctx.lineTo(cx - 9, cy);
@@ -65,7 +78,7 @@ function drawOrnament(ctx, cx, cy, halfW) {
 function drawWatermark(ctx, cx, cy, ch, size) {
   ctx.save();
   ctx.globalAlpha = 0.055;
-  ctx.fillStyle = '#5d4037';
+  ctx.fillStyle = PALETTE.watermark;
   ctx.font = 'bold ' + size + 'px ' + Renderer.PIECE_FONT;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -92,6 +105,7 @@ function decorateGap(ctx, w, y0, y1, ch, ornamentNearY) {
 
 module.exports = {
   BOARD_ASPECT: BOARD_ASPECT,
+  PALETTE: PALETTE,
   drawScreenBg: drawScreenBg,
   drawPanel: drawPanel,
   drawOrnament: drawOrnament,

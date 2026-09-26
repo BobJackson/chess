@@ -40,6 +40,7 @@ miniprogram/
     endgame.js               绝杀演出：镜头化时间线（推镜+顿帧）+ 15 种杀法母题 + 结算卡
     particles.js             粒子系统：固定池零分配（木屑/桂花/冲击波环/墨滴）
     chrome.js                屏幕级装饰（对局/复盘共享）：底色/棋桌面板/水印饰线
+    themes.js                主题色板：松桂（默认）/ 紫金夜（深空紫金），就地切换 + 持久化
   audio/
     bgm-songfeng.m4a         BGM《松风》：合成主题曲（gen-bgm.js，58.4s 无缝循环）
     bgm-guiyue.m4a           BGM《桂月》：实录氛围（修复循环版，38.7s 无缝循环）
@@ -55,7 +56,7 @@ miniprogram/
     menu.js                  主菜单：难度分段 + 三模式入口
     board.js                 对局：状态栏+棋盘+工具栏，ai/local/online 三模式
     replay.js                复盘：终局后按记谱逐步回放（步进/回退/自动播放/绝杀重演）
-    settings.js              系统设置：音乐/配乐/音效/先后手统一入口（行式分段控件）
+    settings.js              系统设置：音乐/配乐/音效/先后手/主题统一入口（行式分段控件）
     ledger.js                账本详情：大比分 + 连胜横幅 + 逐局历史列表（可滚动）
     lobby.js                 联机大厅：建房/加入 + 软键盘房间号
     rules.js                 规则：可滚动文本
@@ -124,7 +125,7 @@ docker compose up -d
   - 《松风》：`npm run gen:bgm`（`scripts/gen-bgm.js`）纯数学合成——D 宫五声音阶 66BPM，古筝拨弦（失谐泛音+长音揉弦）+ 琶音 + 低音拨弦 + 箫垫底，A/B 两段；输出 WAV 后用 afconvert 编码（脚本末尾有提示）。
   - 《桂月》：原实录素材修复版（裁 25s 静音尾 + 1.5s 交叉淡化循环 + 峰值规范化）。
 - **音效**：`audio/*.wav` 由 `npm run gen:sfx`（`scripts/gen-sfx.js`）纯数学合成，无外部素材——落子木质"笃"、吃子闷响、将军两声警示钟、胜/负五声琶音与低锣、按钮轻击、悔棋上挑。
-- **开关与设置**：系统设置页（菜单「系统设置」按钮，位于查看规则之下）统一管理：音乐开关 / 配乐切换 / 音效开关 / 先后手；开关与曲目选择用 `wx.setStorageSync` 持久化。
+- **开关与设置**：系统设置页（菜单「系统设置」按钮，位于查看规则之下）统一管理：音乐开关 / 配乐切换 / 音效开关 / 先后手 / 主题（松桂·紫金夜）；开关、曲目与主题选择用 `wx.setStorageSync` 持久化。
 - 重新生成音效：`npm run gen:sfx`；新增 BGM 曲目：放入 `audio/` 并在 `ui/audio.js` 的 `BGM_TRACKS` 加一行，设置页配乐选项自动跟随。
 - **绝杀语音**：`audio/mate-<key>.m4a`，终局判出杀法时把名字念出来（不只是弹窗显示）。由 `npm run gen:voice`（`scripts/gen-mate-voice.js`）用 macOS 自带的 `say` + `afconvert` 合成，11 条约 88KB；清单以 `core/mate.js` 为单一数据源，改名只需重跑脚本。音频按需创建上下文，不在启动时占用。
 
@@ -152,6 +153,10 @@ docker compose up -d
 ## AI 置换表（TT）
 
 `core/position.js` 用 Zobrist 随机表在 `makeMove/unmakeMove` 里 O(1) 增量维护 `pos.hash`；`core/ai.js` 的搜索上下文持一张 2^16 槽的置换表（EXACT/LOWER/UPPER 三旗标、杀棋分按 ply 折算、深度优先替换），命中走法还参与排序（优先级高于 PV 走法）。效果：同等深度节点数大降（中局 depth 6 约 -36%、depth 8 约 -52%），相同时间内大师档可多搜近一层；走法与分值与无 TT 完全一致（有对照测试）。选项 `noTT: true` 可关闭置换表供对照。
+
+## 主题皮肤（松桂 / 紫金夜）
+
+`ui/themes.js` 在模块加载时给三块现有色板（`renderer.THEME` / `widgets.THEME` / `chrome.PALETTE`）拍出厂快照当「松桂」基线；`setTheme` 先就地还原快照、再叠加目标主题差量——所有绘制调用点持有原对象引用，切换零改动生效。紫金夜 = 深空底 `#16102a` + 紫微盘 + 金线 `#d9b878` + 米白子（夜盘粒子才清晰）+ 紫高光 `#9b7bff`，菜单/对局/复盘/账本/大厅全场景生效，`chess_theme` 持久化。绝杀演出与粒子（木屑/桂花）是内容色，两套主题共用不切换。新增主题 = THEMES 数组加一项差量。
 
 ## 复盘回放
 
@@ -303,13 +308,13 @@ docker compose up -d
 ## 测试
 
 ```bash
-npm test                 # 串联全部，当前 1413 项
+npm test                 # 串联全部，当前 1443 项
 npm run test:engine      # 引擎 71（含 Zobrist 哈希增量一致性）
 npm run test:ai          # AI 46（含分片/同步确定性一致、置换表增益对照）
 npm run test:game        # 对局 143（含送将提示文案：牵制/解将/围死）
 npm run test:ledger      # 松桂账本 52（含逐局历史/连胜/上限/旧账兼容）
 npm run test:mate        # 杀法识别 161
-npm run test:ui          # 布局/渲染 168（含走子抛物线与吃子击飞）
+npm run test:ui          # 布局/渲染 188（含走子抛物线与吃子击飞、主题往返还原）
 npm run test:particles   # 粒子系统 25
 npm run test:controller  # 触摸状态机 267（含被牵制子的选中/点选/拖拽提示）
 npm run test:endgame     # 绝杀演出 137（含动作层：炮弹/马跃/车冲/将震颤）
@@ -317,7 +322,7 @@ npm run test:net         # 联机会话（回环）41
 npm run test:cloud       # 云适配器集成（内存假云）21
 npm run test:ws          # 自建 WS 通道（relay+适配器+假服务端）22
 npm run test:audio       # 音频管理器 58（含 BGM 多曲目切换与持久化）
-npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本详情、打击感、设置页、让先、复盘）201
+npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演出、账本详情、打击感、设置页、让先、复盘、主题切换）211
 ```
 
 杀法的测试局面（15 个已用引擎确认过的将死局面）放在 `scripts/fixtures/mate-cases.js`，
@@ -328,7 +333,7 @@ npm run test:page        # 小游戏接线冒烟（含邀请回流、绝杀演�
 - 点选：先点己方棋子再点绿色落点；拖拽：按住拖到落点松手（拖拽中高亮落点）。
 - 工具栏（自绘于棋盘下方）：悔棋 / 提示 / 翻转 / 重开 / 菜单；联机时悔棋与重开禁用。
 - 规则页支持上下拖动滚动。
-- 系统设置（菜单最下方）：音乐开关 / 配乐切换（松风·桂月）/ 音效开关 / 先后手（执红·让先执黑）。
+- 系统设置（菜单最下方）：音乐开关 / 配乐切换（松风·桂月）/ 音效开关 / 先后手（执红·让先执黑）/ 主题（松桂·紫金夜）。
 
 ## 规则实现
 

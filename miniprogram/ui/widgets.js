@@ -12,15 +12,27 @@ var THEME = {
   panel: '#fffaf0',
   primary: '#5d4037',
   primaryText: '#ffffff',
+  primaryDown: '#4a332c',
   ghostBorder: '#5d4037',
   ghostText: '#5d4037',
+  ghostDown: 'rgba(93,64,55,0.12)',
   title: '#4e342e',
   subtitle: '#8d6e63',
   body: '#5d4037',
   segBg: '#e8d9b8',
   segOn: '#5d4037',
   segText: '#6d4c41',
-  danger: '#b3261e'
+  segOnText: '#ffffff',
+  danger: '#b3261e',
+  // 账本与列表：胜负色点（松/桂/和）、连胜横幅、行分隔线
+  accentSong: '#c98a2b',
+  accentGui: '#c62030',
+  accentDraw: '#8d6e63',
+  divider: 'rgba(93,64,55,0.14)',
+  // 大厅房间号输入框
+  inputFill: '#fffaf0',
+  inputEdge: '#d7c39a',
+  inputHint: '#bcaaa4'
 };
 
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -47,7 +59,7 @@ function hitButton(btn, px, py) {
 function drawButton(ctx, btn, pressed) {
   ctx.save();
   if (btn.style === 'ghost') {
-    ctx.fillStyle = pressed ? 'rgba(93,64,55,0.12)' : 'rgba(0,0,0,0)';
+    ctx.fillStyle = pressed ? THEME.ghostDown : 'rgba(0,0,0,0)';
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, 10);
     ctx.fill();
     ctx.strokeStyle = THEME.ghostBorder;
@@ -56,7 +68,7 @@ function drawButton(ctx, btn, pressed) {
     ctx.stroke();
     ctx.fillStyle = THEME.ghostText;
   } else {
-    ctx.fillStyle = pressed ? '#4a332c' : THEME.primary;
+    ctx.fillStyle = pressed ? THEME.primaryDown : THEME.primary;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, 10);
     ctx.fill();
     ctx.fillStyle = THEME.primaryText;
@@ -85,7 +97,7 @@ function drawSegmented(ctx, x, y, w, h, items, selected) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (var i = 0; i < n; i++) {
-    ctx.fillStyle = i === selected ? '#ffffff' : THEME.segText;
+    ctx.fillStyle = i === selected ? THEME.segOnText : THEME.segText;
     ctx.fillText(items[i], x + i * iw + iw / 2, y + h / 2 + 1);
   }
   ctx.restore();

@@ -249,10 +249,10 @@ function createLobbyScene(app) {
     // 输入框
     var b = scene.inputBox;
     ctx.save();
-    ctx.fillStyle = '#fffaf0';
+    ctx.fillStyle = W.THEME.inputFill;
     W.roundRectPath(ctx, b.x, b.y, b.w, b.h, 10);
     ctx.fill();
-    ctx.strokeStyle = '#d7c39a';
+    ctx.strokeStyle = W.THEME.inputEdge;
     ctx.lineWidth = 1.5;
     W.roundRectPath(ctx, b.x, b.y, b.w, b.h, 10);
     ctx.stroke();
@@ -260,7 +260,7 @@ function createLobbyScene(app) {
     if (scene.code) {
       W.drawText(ctx, scene.code, b.x + b.w / 2, b.y + b.h / 2, 22, W.THEME.title, 'center', true);
     } else {
-      W.drawText(ctx, '点此输入 4 位房间号', b.x + b.w / 2, b.y + b.h / 2, 14, '#bcaaa4', 'center');
+      W.drawText(ctx, '点此输入 4 位房间号', b.x + b.w / 2, b.y + b.h / 2, 14, W.THEME.inputHint, 'center');
     }
 
     for (var i = 0; i < scene.buttons.length; i++) {

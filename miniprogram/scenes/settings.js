@@ -8,6 +8,7 @@
  * 视觉语言与规则页一致（返回按钮 + 标题 + 行式内容）。
  */
 var W = require('../ui/widgets.js');
+var Themes = require('../ui/themes.js');
 var C = require('../core/constants.js');
 
 function createSettingsScene(app) {
@@ -49,6 +50,13 @@ function createSettingsScene(app) {
         get: function () { return app.humanSide === C.BLACK ? 1 : 0; },
         set: function (i) { app.humanSide = i === 1 ? C.BLACK : C.RED; },
         note: '人机/本地生效；联机由房间分配'
+      },
+      {
+        id: 'theme', label: '主题',
+        items: Themes.THEMES.map(function (t) { return t.name; }),
+        get: function () { return Themes.indexOf(Themes.key()); },
+        set: function (i) { Themes.setTheme(Themes.THEMES[i].key); },
+        note: '松桂 · 米白暖木 / 紫金夜 · 深空紫金'
       }
     ];
   }

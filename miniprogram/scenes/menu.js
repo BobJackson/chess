@@ -2,6 +2,7 @@
  * 主菜单场景：难度选择 + 三种模式入口 + 规则
  */
 var W = require('../ui/widgets.js');
+var Chrome = require('../ui/chrome.js');
 var AI = require('../core/ai.js');
 var Particles = require('../ui/particles.js');
 
@@ -24,7 +25,7 @@ function drawLedger(ctx, w, y, app) {
     W.setFont(ctx, 14, true);
     var tw = ctx.measureText(line1).width;
     var cx = w / 2;
-    ctx.strokeStyle = 'rgba(93,64,55,0.30)';
+    ctx.strokeStyle = Chrome.PALETTE.ornament;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(cx - tw / 2 - 32, y); ctx.lineTo(cx - tw / 2 - 12, y);

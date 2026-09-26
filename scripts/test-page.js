@@ -637,7 +637,7 @@ console.log('\n[12] 菜单桂花粒子');
   truthy('花瓣数量受上限约束', m.fx.count() <= 16);
 })();
 
-console.log('\n[13] 设置页：音乐/配乐/音效/先后手统一管理');
+console.log('\n[13] 设置页：音乐/配乐/音效/先后手/主题统一管理');
 (function () {
   var C = require(path.join(__dirname, '..', 'miniprogram', 'core', 'constants.js'));
   var m = manager.current;
@@ -650,9 +650,9 @@ console.log('\n[13] 设置页：音乐/配乐/音效/先后手统一管理');
   tap(gear.x, gear.y);
   assert('进入设置页', manager.current.name, 'settings');
   var s = manager.current;
-  assert('四行设置项', s.rows.length, 4);
-  assert('行序：音乐/配乐/音效/先后手',
-    s.rows.map(function (r) { return r.id; }).join(','), 'bgm,track,sfx,side');
+  assert('五行设置项', s.rows.length, 5);
+  assert('行序：音乐/配乐/音效/先后手/主题',
+    s.rows.map(function (r) { return r.id; }).join(','), 'bgm,track,sfx,side,theme');
   pump(16);
   truthy('设置页已绘制', global.__canvas.ctx.calls.fillText.indexOf('系统设置') >= 0);
 
@@ -687,6 +687,25 @@ console.log('\n[13] 设置页：音乐/配乐/音效/先后手统一管理');
   assert('默认执红', app.humanSide, C.RED);
   tapSeg(row('side'), 0.75);
   assert('切到让先执黑', app.humanSide, C.BLACK);
+
+  // 主题：松桂 → 紫金夜 → 切回（切回后色值还原）
+  var Themes = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'themes.js'));
+  var Wm = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'widgets.js'));
+  var Rm = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'renderer.js'));
+  var Cm = require(path.join(__dirname, '..', 'miniprogram', 'ui', 'chrome.js'));
+  assert('默认主题为松桂', Themes.key(), 'pine');
+  var bgBefore = Wm.THEME.bg;
+  tapSeg(row('theme'), 0.75);
+  assert('切到紫金夜', Themes.key(), 'nebula');
+  assert('控件底色已换', Wm.THEME.bg, '#1a1230');
+  assert('棋盘格线已换金', Rm.THEME.line, '#d9b878');
+  assert('屏幕底色已换深空', Cm.PALETTE.bgStops[0], '#1e1436');
+  assert('主题已持久化', storageData.chess_theme, 'nebula');
+  tapSeg(row('theme'), 0.25);
+  assert('切回松桂', Themes.key(), 'pine');
+  assert('控件底色还原', Wm.THEME.bg, bgBefore);
+  assert('棋盘格线还原', Rm.THEME.line, '#5d4037');
+  assert('持久化同步还原', storageData.chess_theme, 'pine');
 
   // 返回菜单
   tap(s.back.x + s.back.w / 2, s.back.y + s.back.h / 2);
