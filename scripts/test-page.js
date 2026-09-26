@@ -229,6 +229,7 @@ console.log('\n[1] 入口与主菜单');
 (function () {
   truthy('app 上下文创建', app);
   assert('初始场景为菜单', manager.current.name, 'menu');
+  assert('桩环境无刘海下沉量', app.topInset, 0);
   truthy('菜单按钮已布局', manager.current.buttons.length === 5);
   pump(16);
   truthy('菜单已绘制', global.__canvas.ctx.calls.fillText.length > 0);

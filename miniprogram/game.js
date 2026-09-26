@@ -28,6 +28,11 @@ audio.init();
 // ---------------------------------------------------------------------------
 var info = wx.getSystemInfoSync();
 var dpr = info.pixelRatio || 2;
+
+// 安全区：刘海/滴水屏的 safeArea.top 可达 44~59（普通屏约 20）。
+// 现有布局按 20 的状态栏设计，只需补上「超出 20」的那部分下沉量。
+var safeTop = (info.safeArea && typeof info.safeArea.top === 'number') ? info.safeArea.top : 0;
+var topInset = Math.max(0, safeTop - 20);
 var canvas = wx.createCanvas();
 canvas.width = Math.round(info.windowWidth * dpr);
 canvas.height = Math.round(info.windowHeight * dpr);
@@ -44,6 +49,8 @@ var raf = canvas.requestAnimationFrame
 var app = {
   w: info.windowWidth,
   h: info.windowHeight,
+  /** 刘海/滴水屏的顶部额外下沉量（普通屏为 0），各场景顶部布局都要加 */
+  topInset: topInset,
   ctx: ctx,
   canvas: canvas,
   difficulty: 'normal',

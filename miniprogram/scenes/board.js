@@ -81,6 +81,8 @@ function createBoardScene(app) {
   // -------------------------------------------------------------------------
 
   scene.onEnter = function (params) {
+    // 刘海/滴水屏：状态栏整体下沉，避免模式文案被挖孔盖住
+    scene.statusH = 44 + (app.topInset || 0);
     scene.mode = params.mode === 'local' ? 'local' : (params.mode === 'online' ? 'online' : 'ai');
     scene.session = scene.mode === 'online' ? app.session : null;
     if (scene.mode === 'online' && !scene.session) { app.go('menu'); return; }

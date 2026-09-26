@@ -61,6 +61,8 @@ function createReplayScene(app) {
 
   scene.onEnter = function (params) {
     params = params || {};
+    // 刘海/滴水屏：状态栏整体下沉（与对局场景一致）
+    scene.statusH = 44 + (app.topInset || 0);
     var data = params.data || {};
     scene.fen = data.fen || C.START_FEN;
     scene.moves = Array.isArray(data.moves) ? data.moves : [];

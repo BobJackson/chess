@@ -46,7 +46,10 @@ function createRulesScene(app) {
 
   scene.onEnter = function () {
     var w = app.w;
-    scene.back = W.makeButton('back', 16, 16, 72, 34, '返回', 'ghost');
+    var inset = app.topInset || 0;
+    scene.inset = inset;
+    scene.topPad = 64 + inset;
+    scene.back = W.makeButton('back', 16, 16 + inset, 72, 34, '返回', 'ghost');
     // 预折行
     var ctx = app.ctx;
     scene.lines = [];
@@ -82,7 +85,7 @@ function createRulesScene(app) {
 
   scene.render = function (ctx, w, h) {
     W.fillBackground(ctx, w, h);
-    W.drawText(ctx, '规则', w / 2, 33, 18, W.THEME.title, 'center', true);
+    W.drawText(ctx, '规则', w / 2, 33 + (scene.inset || 0), 18, W.THEME.title, 'center', true);
     W.drawButton(ctx, scene.back, false);
 
     ctx.save();

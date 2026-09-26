@@ -54,14 +54,16 @@ function createSettingsScene(app) {
   }
 
   scene.onEnter = function () {
-    scene.back = W.makeButton('back', 16, 16, 72, 34, '返回', 'ghost');
+    var inset = app.topInset || 0;
+    scene.back = W.makeButton('back', 16, 16 + inset, 72, 34, '返回', 'ghost');
+    scene.titleY = 33 + inset;
     scene.rows = buildRows();
 
     // 行布局：标签在左，分段选择器在右
     var w = app.w;
     var pad = 28;
     var segW = Math.min(220, w * 0.56);
-    var y = 96;
+    var y = 96 + inset;
     for (var i = 0; i < scene.rows.length; i++) {
       var r = scene.rows[i];
       r.seg = { x: w - pad - segW, y: y, w: segW, h: 38 };
@@ -87,7 +89,7 @@ function createSettingsScene(app) {
 
   scene.render = function (ctx, w, h) {
     W.fillBackground(ctx, w, h);
-    W.drawText(ctx, '系统设置', w / 2, 33, 18, W.THEME.title, 'center', true);
+    W.drawText(ctx, '系统设置', w / 2, scene.titleY, 18, W.THEME.title, 'center', true);
     W.drawButton(ctx, scene.back, false);
 
     for (var i = 0; i < scene.rows.length; i++) {
