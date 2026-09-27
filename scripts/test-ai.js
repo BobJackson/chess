@@ -359,8 +359,11 @@ console.log('\n[11] 置换表：同等深度更少节点、结果不变');
 
   truthy('置换表确有命中', withTT.ttHits > 0);
   truthy('同深度节点数下降（实测约 -36%）', withTT.nodes < noTT.nodes);
-  assert('走法不因置换表改变', withTT.move, noTT.move);
-  assert('分值不因置换表改变', withTT.score, noTT.score);
+  // 晚走法削减（LMR）之后，置换表命中会改变走法排序 → 改变哪些走法被削减，
+  // 因此两者不再要求逐位相同；但分值不该出现实质分歧（这里卡 ≤ 20 分），
+  // 而且带表的走法必须合法——这条仍然是防置换表写坏的有效底线。
+  truthy('带/不带置换表分值无实质分歧（差 ≤ 20）', Math.abs(withTT.score - noTT.score) <= 20);
+  truthy('带置换表的走法合法', MG.genLegalMoves(midgame(), C.RED).indexOf(withTT.move) >= 0);
   console.log('        depth 6：节点 ' + noTT.nodes + ' → ' + withTT.nodes +
     '（-' + (100 * (1 - withTT.nodes / noTT.nodes)).toFixed(1) + '%），命中 ' + withTT.ttHits + ' 次');
 

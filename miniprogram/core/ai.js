@@ -19,9 +19,15 @@ var INF = 1000000;
 var MATE = 100000;
 var MAX_PLY = 40;
 var MAX_QPLY = 14;
-/** 主搜索中只对分值最高的前 ORDER_K 个走法做选择排序，其余保持生成顺序 */
-var ORDER_K = 12;
-var CAPTURE_ORDER_K = 8;
+// 走法排序在 orderMoves 里对整个走法列表排序（不再只排前几手）：
+// 排序质量直接决定 alpha-beta 的剪枝量，也是后续做剪枝的前提。
+//
+// 晚走法削减（LMR）：排序做扎实之后才敢开——靠后的安静走法先减一层搜，
+// 只有抬升了 alpha 才按原深度补搜。上一轮在没有全排序时开它，等时对抗
+// 0 胜 4 负（好棋排在乱序里被随机砍掉）；全排序后重新验证。
+var LMR_MIN_DEPTH = 4;
+var LMR_MIN_MOVES = 4;
+var LMR_REDUCTION = 1;
 
 // ---------------------------------------------------------------------------
 // 置换表：固定 2^16 槽的扁平 typed-array 表，键为 Position 的 Zobrist 哈希
@@ -175,7 +181,14 @@ function recordKiller(ctx, ply, move) {
 }
 
 /**
- * 走法排序分值：置换表走法 > PV 走法 > 吃子(MVV-LVA) > 杀手走法 > 历史启发+位置增益
+ * 走法排序分值（越大越先搜）
+ *
+ * 顺序：置换表走法 > 上一层 PV 走法 > 划算的吃子(MVV-LVA) > 杀手走法 >
+ *      安静走法(历史启发 + 位置增益) > **亏子的吃子**
+ *
+ * 最后一类是 SEE 的简化版：吃的子比自己便宜、且对方能回吃（车吃有根的马、
+ * 炮打有保护的兵）。这类走法很少是好棋、搜起来却贵（子树大），排在安静走法
+ * 之后能省下大量节点；"吃子无根"和"便宜子吃贵子"仍然排在最前面。
  */
 function moveScore(pos, move, ply, ctx) {
   if (ctx.hashMove[ply] === move) return 3000000;
@@ -187,7 +200,13 @@ function moveScore(pos, move, ply, ctx) {
   var attacker = pos.board[from];
 
   if (victim !== C.EMPTY) {
-    return 1000000 + EV.pieceValue(victim) * 20 - EV.pieceValue(attacker);
+    var victimValue = EV.pieceValue(victim);
+    var attackerValue = EV.pieceValue(attacker);
+    if (victimValue < attackerValue &&
+        MG.isSquareAttacked(pos, to, pos.side === C.RED ? C.BLACK : C.RED, from)) {
+      return -1000000 + victimValue;
+    }
+    return 1000000 + victimValue * 20 - attackerValue;
   }
 
   var killers = ctx.killers[ply];
@@ -209,8 +228,14 @@ function moveScore(pos, move, ply, ctx) {
   return ctx.history[from * C.BOARD_SIZE + to] + gain * 8;
 }
 
-/** 对 [start, end) 区间计算分值，并把分值最高的前 k 个选择排序到区间前部 */
-function orderMoves(pos, ctx, start, end, ply, k) {
+/**
+ * 对 [start, end) 区间计算分值并**整体**排序
+ *
+ * 以前只把前 ORDER_K 手做选择排序，其余保持生成顺序——那些没排过序的走法在
+ * alpha-beta 里基本等于白搜（好棋排在后面，剪枝就少）。排序质量直接决定剪枝量，
+ * 而剪枝是后续一切加速（晚走法削减、空着裁剪）的前提，所以这里排满整个区间。
+ */
+function orderMoves(pos, ctx, start, end, ply) {
   var moves = ctx.moveStack;
   var scores = ctx.scoreStack;
   var i, j;
@@ -219,8 +244,7 @@ function orderMoves(pos, ctx, start, end, ply, k) {
     scores[i] = moveScore(pos, moves[i], ply, ctx);
   }
 
-  var limit = Math.min(end, start + k);
-  for (i = start; i < limit; i++) {
+  for (i = start; i < end; i++) {
     var maxIdx = i;
     for (j = i + 1; j < end; j++) {
       if (scores[j] > scores[maxIdx]) maxIdx = j;
@@ -255,7 +279,7 @@ function quiesce(pos, alpha, beta, ply, qply, ctx) {
   var end = stack.length;
   if (end === start) return best;
 
-  orderMoves(pos, ctx, start, end, ply, CAPTURE_ORDER_K);
+  orderMoves(pos, ctx, start, end, ply);
 
   var undo = ctx.undoPool[ply];
   for (var i = start; i < end; i++) {
@@ -433,7 +457,7 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     return -MATE + ply;
   }
 
-  orderMoves(pos, ctx, start, end, ply, ORDER_K);
+  orderMoves(pos, ctx, start, end, ply);
 
   var undo = ctx.undoPool[ply];
   var best = -INF;
@@ -448,7 +472,17 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
 
     pos.makeMove(from, to, undo);
 
-    var score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
+    var score;
+    // 晚走法削减：全排序之后靠后的安静走法确实"不太可能好"，先减一层搜；
+    // 抬升了 alpha 说明判断错了，再按原深度补搜（吃子不削减，容易漏杀）
+    if (quiet && depth >= LMR_MIN_DEPTH && i - start >= LMR_MIN_MOVES) {
+      score = -negamax(pos, depth - 1 - LMR_REDUCTION, -beta, -alpha, ply + 1, ctx);
+      if (!ctx.aborted && score > alpha) {
+        score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
+      }
+    } else {
+      score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
+    }
     pos.unmakeMove(undo);
 
     if (ctx.aborted) break;
@@ -498,7 +532,7 @@ function searchRoot(pos, depth, exact, ctx) {
   var end = stack.length;
   if (end === start) return null;
 
-  orderMoves(pos, ctx, start, end, 0, ORDER_K);
+  orderMoves(pos, ctx, start, end, 0);
 
   var moves = [];
   var undo = ctx.undoPool[0];
@@ -840,7 +874,7 @@ function createSearch(pos, options) {
     var stack = ctx.moveStack;
     var start = MG.genLegalMovesInPlace(pos, pos.side, stack, false, ctx.filterUndo);
     var end = stack.length;
-    orderMoves(pos, ctx, start, end, 0, ORDER_K);
+    orderMoves(pos, ctx, start, end, 0);
     var moves = [];
     var i;
     for (i = start; i < end; i++) moves.push(stack[i]);

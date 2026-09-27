@@ -232,6 +232,97 @@ function isChecked(pos, side) {
   return false;
 }
 
+/**
+ * 判断 idx 格是否被 bySide 一方攻击（走法排序的 SEE 用）
+ *
+ * 与 isChecked 的区别：这里判任意格子，且"将"只按相邻格攻击（不算将帅照面）。
+ * skipIdx 用于把某个格子当成空的（SEE 里模拟"攻击子已经离开原位"）。
+ *
+ * @param {Position} pos
+ * @param {number} idx 被攻击的格子
+ * @param {number} bySide 攻击方
+ * @param {number} [skipIdx] 视为空格的格子
+ * @returns {boolean}
+ */
+function isSquareAttacked(pos, idx, bySide, skipIdx) {
+  var board = pos.board;
+  var file = C.fileOf(idx);
+  var rank = C.rankOf(idx);
+
+  var eKing = bySide === C.RED ? C.R_KING : C.B_KING;
+  var eRook = bySide === C.RED ? C.R_ROOK : C.B_ROOK;
+  var eCannon = bySide === C.RED ? C.R_CANNON : C.B_CANNON;
+  var eKnight = bySide === C.RED ? C.R_KNIGHT : C.B_KNIGHT;
+  var ePawn = bySide === C.RED ? C.R_PAWN : C.B_PAWN;
+
+  var i, d, ray, piece, screened;
+
+  // 1) 直线：车（首个子）、炮（隔一个子后的首个子）
+  var dirs = C.RAY_DIRS[idx];
+  for (d = 0; d < 4; d++) {
+    ray = dirs[d];
+    screened = false;
+    for (i = 0; i < ray.length; i++) {
+      var sq = ray[i];
+      piece = sq === skipIdx ? C.EMPTY : board[sq];
+      if (piece === C.EMPTY) continue;
+      if (!screened) {
+        screened = true;
+        if (piece === eRook) return true;
+      } else {
+        if (piece === eCannon) return true;
+        break;
+      }
+    }
+  }
+
+  // 2) 马：反查 8 个可能的马位，并验证马腿（马腿相对于马自身）
+  for (i = 0; i < 8; i++) {
+    var sf = file + KNIGHT_SOURCES[i][0];
+    var sr = rank + KNIGHT_SOURCES[i][1];
+    if (sf < 0 || sf > 8 || sr < 0 || sr > 9) continue;
+    var sIdx = C.idxOf(sf, sr);
+    if (sIdx === skipIdx || board[sIdx] !== eKnight) continue;
+    var df = file - sf;
+    var dr = rank - sr;
+    var legIdx;
+    if (dr === 2 || dr === -2) {
+      legIdx = C.idxOf(sf, sr + (dr > 0 ? 1 : -1));
+    } else {
+      legIdx = C.idxOf(sf + (df > 0 ? 1 : -1), sr);
+    }
+    if (legIdx === skipIdx || board[legIdx] === C.EMPTY) return true;
+  }
+
+  // 3) 兵/卒：攻击方的前方一步 + 过河后的横向
+  var frontRank = bySide === C.RED ? rank + 1 : rank - 1;
+  if (frontRank >= 0 && frontRank <= 9) {
+    var fIdx = C.idxOf(file, frontRank);
+    if (fIdx !== skipIdx && board[fIdx] === ePawn) return true;
+  }
+  for (i = -1; i <= 1; i += 2) {
+    var nf = file + i;
+    if (nf < 0 || nf > 8) continue;
+    var nIdx = C.idxOf(nf, rank);
+    if (nIdx === skipIdx || board[nIdx] !== ePawn) continue;
+    // 兵/卒必须已过河才能横走：红兵在 rank ≤ 4、黑卒在 rank ≥ 5
+    if (bySide === C.RED ? rank <= 4 : rank >= 5) return true;
+  }
+
+  // 4) 将/帅：只能吃九宫内相邻的一格
+  var inPalace = bySide === C.RED
+    ? (rank >= 7 && rank <= 9 && file >= 3 && file <= 5)
+    : (rank >= 0 && rank <= 2 && file >= 3 && file <= 5);
+  if (inPalace) {
+    if (file > 0 && board[C.idxOf(file - 1, rank)] === eKing) return true;
+    if (file < 8 && board[C.idxOf(file + 1, rank)] === eKing) return true;
+    if (rank > 0 && board[C.idxOf(file, rank - 1)] === eKing) return true;
+    if (rank < 9 && board[C.idxOf(file, rank + 1)] === eKing) return true;
+  }
+
+  return false;
+}
+
 /** 双方将帅是否照面（同一直线且中间无子） */
 function kingsAreFacing(pos) {
   var rk = pos.kingPos[C.RED];
@@ -344,6 +435,7 @@ module.exports = {
   genLegalMoves: genLegalMoves,
   genLegalMovesInPlace: genLegalMovesInPlace,
   isChecked: isChecked,
+  isSquareAttacked: isSquareAttacked,
   kingsAreFacing: kingsAreFacing,
   hasLegalMove: hasLegalMove,
   isMoveLegal: isMoveLegal,
