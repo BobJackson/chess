@@ -433,10 +433,10 @@ console.log('\n[13] 重复局面：长将判负 / 双方长将 / 不变作和（
   assert('单方长将：分值随层数收敛', a, -AI.MATE + 4);
   // 同一循环若轮到黑方走，红方长将判负 → 黑方视角为正
   truthy('单方长将：对方视角为正', judge(C.RED, [0, 1, 0, 1, 0], 4, BLACK_TURN) > AI.MATE - 1000);
-  // 双方都在将军 → 双方长将，不变作和
-  assert('双方长将：判和', judge(C.RED, [0, 1, 1, 1, 1], 4, RED_TURN), 0);
+  // 双方都在将军 → 双方长将，不变作和（分值为 REPETITION_DRAW，不是 0：引擎不甘心和棋）
+  assert('双方长将：判和（不甘心，给负分）', judge(C.RED, [0, 1, 1, 1, 1], 4, RED_TURN), AI.REPETITION_DRAW);
   // 双方都不将军（纯粹往返走子）→ 不变作和
-  assert('双方都不将军：判和', judge(C.RED, [0, 0, 0, 0, 0], 4, RED_TURN), 0);
+  assert('双方都不将军：判和（不甘心，给负分）', judge(C.RED, [0, 0, 0, 0, 0], 4, RED_TURN), AI.REPETITION_DRAW);
   // 黑方每手将军、红方不将军 → 黑方长将判负，红方视角为正
   truthy('对方长将：我方视角为正', judge(C.RED, [0, 0, 1, 0, 1], 4, RED_TURN) > AI.MATE - 1000);
 })();

@@ -317,6 +317,16 @@ function ttReadScore(score, ply) {
 // 分值不写入置换表：它依赖搜索路径，换个路径就不成立。
 // ---------------------------------------------------------------------------
 
+// 重复局面（双方不变作和）在搜索内的分值：**故意给负分**，也就是"不甘心和棋"。
+//
+// 给 0 会出大问题：引擎只要算出自己略微落后（比如 -30），就会去往返走子凑重复和棋
+// ——分值是 0，比 -30 好。对手不配合（人类、或带随机性的低难度）时，它就白挨打。
+// 实测：关掉重复判定后大师能赢「简单」，开着却输/和。
+//
+// 给 -120（约 1.7 个兵）的含义是"只有明显落后才认和"：均势与微劣时继续找机会，
+// 真被压住了仍然会接受和棋（-600 的局面里和棋 -120 依然划算）。
+var REPETITION_DRAW = -120;
+
 /**
  * 判定当前节点是否构成重复局面
  *
@@ -342,7 +352,7 @@ function repetitionValue(pos, ply, ctx) {
  * @param {number} ply 当前层
  * @param {Position} pos 当前局面
  * @param {object} ctx 搜索上下文
- * @returns {number} 不变作和为 0；单方长将时给出该方判负的杀棋分
+ * @returns {number} 不变作和为 REPETITION_DRAW；单方长将时给出该方判负的杀棋分
  */
 function repeatSegmentValue(first, ply, pos, ctx) {
   // 根节点走子方在奇数层落子，另一方在偶数层落子
@@ -369,7 +379,7 @@ function repeatSegmentValue(first, ply, pos, ctx) {
   } else if (foeTotal > 0 && foeCheck === foeTotal && moverCheck === 0) {
     perpetual = mover === C.RED ? C.BLACK : C.RED;
   }
-  if (perpetual < 0) return 0;
+  if (perpetual < 0) return REPETITION_DRAW;
 
   // 长将方判负，量纲与引擎其它杀棋分一致（从当前节点走子方视角）
   return pos.side === perpetual ? -MATE + ply : MATE - ply;
@@ -1047,5 +1057,6 @@ module.exports = {
   evaluatePosition: evaluatePosition,
   createContext: createContext,
   // 重复局面判定（长将判负 / 不变作和），导出供测试直接验证规则
-  repeatSegmentValue: repeatSegmentValue
+  repeatSegmentValue: repeatSegmentValue,
+  REPETITION_DRAW: REPETITION_DRAW
 };

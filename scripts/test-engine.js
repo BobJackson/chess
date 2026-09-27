@@ -14,6 +14,7 @@
 var Position = require('../miniprogram/core/position.js');
 var MG = require('../miniprogram/core/movegen.js');
 var C = require('../miniprogram/core/constants.js');
+var EV = require('../miniprogram/core/evaluate.js');
 
 var passed = 0;
 var failed = 0;
@@ -302,6 +303,61 @@ console.log('\n[10] Zobrist 哈希：增量维护与全量重算一致');
   // clone 携带哈希
   var cl = a.clone();
   assert('clone 复制哈希', cl.hash, a.hash);
+})();
+
+console.log('\n[11] 评估函数：对称性 + 将帅安全 / 缺士怕车');
+(function () {
+  // 初始局面红黑完全对称，评估必须是 0
+  assert('初始局面评估为 0', EV.evaluate(new Position()), 0);
+
+  // 镜像反对称：红黑对调 + 上下翻转后，分值应取相反数
+  function mirrorFen(fen) {
+    var parts = fen.split(' ');
+    var rows = parts[0].split('/');
+    var out = [];
+    for (var r = rows.length - 1; r >= 0; r--) {
+      var row = rows[r];
+      var s = '';
+      for (var k = 0; k < row.length; k++) {
+        var ch = row[k];
+        s += (ch >= '1' && ch <= '9') ? ch : (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase());
+      }
+      out.push(s);
+    }
+    return out.join('/') + ' ' + (parts[1] === 'w' ? 'b' : 'w') + ' - - 0 1';
+  }
+  var symmetric = [
+    new Position().toFen(),
+    'r1bakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RNBAKABNR w - - 0 1',
+    '3k5/9/4r4/9/9/4R4/9/9/9/4K4 w - - 0 1',
+    '1c2k4/9/9/9/9/9/9/4p4/4A4/3AK1R2 b - - 0 1'
+  ];
+  var ok = true;
+  symmetric.forEach(function (fen) {
+    if (EV.evaluate(new Position(fen)) + EV.evaluate(new Position(mirrorFen(fen))) !== 0) ok = false;
+  });
+  assert('镜像反对称（4 个局面）', ok, true);
+
+  // 将帅安全①：车与对方将同列且无遮挡 = 直取，威胁应高于被挡住时
+  var rookOpen = EV.evaluate(new Position('3k5/9/9/9/9/9/9/9/9/3K1R3 w - - 0 1'));
+  var rookBlocked = EV.evaluate(new Position('3k5/9/9/9/4P4/9/9/9/9/3K1R3 w - - 0 1'));
+  console.log('        红车直取黑将 = ' + rookOpen + '，被自家兵挡住 = ' + rookBlocked);
+  assert('车同列直取：有遮挡时少算了威胁（扣掉多出的兵价值后）',
+    rookOpen - rookBlocked < EV.PIECE_VALUE[7], true);
+
+  // 将帅安全②：炮同列需要炮架才算威胁
+  var cannonWithScreen = EV.evaluate(new Position('3k5/9/9/9/4P4/9/9/9/9/3K1C3 w - - 0 1'));
+  var cannonNoScreen = EV.evaluate(new Position('3k5/9/9/9/9/9/9/9/9/3K1C3 w - - 0 1'));
+  assert('炮同列有架比无架威胁更大（差值 > 兵的价值）',
+    cannonWithScreen - cannonNoScreen > EV.PIECE_VALUE[7], true);
+
+  // 缺士怕车：同一个士，对方还有车时边际价值更大（缺士的惩罚随对方攻击力放大）
+  var advisorWithRook = EV.evaluate(new Position('r2k5/9/9/9/9/9/9/9/4A4/3K1R3 w - - 0 1'))
+    - EV.evaluate(new Position('r2k5/9/9/9/9/9/9/9/9/3K1R3 w - - 0 1'));
+  var advisorNoRook = EV.evaluate(new Position('3k5/9/9/9/9/9/9/9/4A4/3K1R3 w - - 0 1'))
+    - EV.evaluate(new Position('3k5/9/9/9/9/9/9/9/9/3K1R3 w - - 0 1'));
+  console.log('        士的边际价值：对方有车 ' + advisorWithRook + '，无车 ' + advisorNoRook);
+  assert('缺士怕车：对方有车时士的边际价值更大', advisorWithRook > advisorNoRook, true);
 })();
 
 console.log('\n----------------------------------------');

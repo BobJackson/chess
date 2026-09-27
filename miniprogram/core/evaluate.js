@@ -143,6 +143,37 @@ var PST = {
 // 残局判定阈值：双方非将帅子力总和低于该值时视为进入残局
 var ENDGAME_MATERIAL = 2200;
 
+// ---------------------------------------------------------------------------
+// 将帅安全
+//
+// 象棋里"将帅安全"不像国际象棋那样靠兵形，而是看**对方攻子离九宫有多近、
+// 能不能直取**：沉底车、当头炮、卧槽马都是这个意思。这里用"攻子到对方将帅的
+// 切比雪夫距离 + 是否同线（同线再加权、车无遮挡/炮有炮架才算真威胁）"来近似，
+// 折进位置价值那一趟扫描里算，不额外增加棋盘遍历。
+// ---------------------------------------------------------------------------
+
+/** 各兵种逼近对方九宫的基础威胁值（按棋子类型索引：4 马 / 5 车 / 6 炮 / 7 兵） */
+var KING_THREAT = [0, 0, 0, 0, 14, 26, 20, 8];
+
+/** 攻子离对方将帅多远以内才算威胁 */
+var KING_THREAT_RANGE = 3;
+
+/**
+ * 数 (from, to) 之间（不含两端）有几个子：车要 0 个才直取，炮要恰好 1 个当炮架
+ * @param {Array<number>} board
+ * @param {number} from
+ * @param {number} to 与 from 同一列或同一行
+ * @param {number} step 同列传 C.FILES，同行传 1（idx 布局：rank * FILES + file）
+ */
+function countBlockers(board, from, to, step) {
+  var s = to > from ? step : -step;
+  var n = 0;
+  for (var i = from + s; i !== to; i += s) {
+    if (board[i] !== C.EMPTY) n++;
+  }
+  return n;
+}
+
 /**
  * 评估局面
  * @param {Position} pos
@@ -153,16 +184,30 @@ function evaluate(pos) {
   var score = 0;
   var redMaterial = 0;
   var blackMaterial = 0;
+  var redRook = 0, redCannon = 0, redAdvisor = 0, redBishop = 0;
+  var blackRook = 0, blackCannon = 0, blackAdvisor = 0, blackBishop = 0;
   var i, piece, type, value;
 
+  // 第一趟：子力价值，顺带数各兵种（"缺士怕车、缺象怕炮"要用）
   for (i = 0; i < C.BOARD_SIZE; i++) {
     piece = board[i];
     if (piece === C.EMPTY) continue;
     type = piece > 0 ? piece : -piece;
     if (type === 1) continue; // 将帅价值不计入子力统计
     value = PIECE_VALUE[type];
-    if (piece > 0) redMaterial += value;
-    else blackMaterial += value;
+    if (piece > 0) {
+      redMaterial += value;
+      if (type === 5) redRook++;
+      else if (type === 6) redCannon++;
+      else if (type === 2) redAdvisor++;
+      else if (type === 3) redBishop++;
+    } else {
+      blackMaterial += value;
+      if (type === 5) blackRook++;
+      else if (type === 6) blackCannon++;
+      else if (type === 2) blackAdvisor++;
+      else if (type === 3) blackBishop++;
+    }
   }
 
   // 残局系数 0~1：子力越少，兵（卒）与将帅活动性的权重越高
@@ -171,6 +216,12 @@ function evaluate(pos) {
     ? 0
     : (ENDGAME_MATERIAL - totalMaterial) / ENDGAME_MATERIAL;
 
+  var redKing = pos.kingPos[C.RED];
+  var blackKing = pos.kingPos[C.BLACK];
+  var redThreat = 0;    // 红方攻子对黑方九宫的威胁
+  var blackThreat = 0;  // 黑方攻子对红方九宫的威胁
+
+  // 第二趟：位置价值 + 攻子逼近对方九宫
   for (i = 0; i < C.BOARD_SIZE; i++) {
     piece = board[i];
     if (piece === C.EMPTY) continue;
@@ -190,36 +241,44 @@ function evaluate(pos) {
     } else {
       score -= PIECE_VALUE[type] + positional;
     }
-  }
 
-  // 士象全的防御加成：对方有炮时，缺士象风险更大
-  var redDefence = countDefenders(board, C.RED);
-  var blackDefence = countDefenders(board, C.BLACK);
-  var redHasCannon = hasPieceType(board, C.R_CANNON);
-  var blackHasCannon = hasPieceType(board, C.B_CANNON);
-  if (blackHasCannon) score += redDefence * 12;
-  if (redHasCannon) score -= blackDefence * 12;
+    // 攻子威胁对方九宫：分两种情形
+    //   ① 同一列/同一行——车无遮挡、炮有炮架就能直取将帅（沉底车、当头炮），
+    //      距离再远也是真威胁，给双倍权重；被挡住则减半。
+    //   ② 不在同一线——只有靠近（切比雪夫距离 ≤ 3）才算威胁（卧槽马、近身车炮）。
+    if (type >= 4 && type <= 7) {
+      var foeKing = piece > 0 ? blackKing : redKing;
+      if (foeKing >= 0) {
+        var df = C.fileOf(i) - C.fileOf(foeKing);
+        var dr = C.rankOf(i) - C.rankOf(foeKing);
+        if (df < 0) df = -df;
+        if (dr < 0) dr = -dr;
+        var near = df > dr ? df : dr;
+        var w = 0;
+        if (df === 0 || dr === 0) {
+          var blockers = countBlockers(board, i, foeKing, df === 0 ? C.FILES : 1);
+          if (type === 5) w = blockers === 0 ? KING_THREAT[5] * 2 : KING_THREAT[5] >> 1;
+          else if (type === 6) w = blockers === 1 ? KING_THREAT[6] * 2 : KING_THREAT[6] >> 1;
+          else w = near <= 2 ? KING_THREAT[type] : KING_THREAT[type] >> 1;
+        } else if (near <= KING_THREAT_RANGE) {
+          w = near <= 1 ? (KING_THREAT[type] * 3) >> 1 : KING_THREAT[type];
+        }
+        if (w > 0) {
+          if (piece > 0) redThreat += w; else blackThreat += w;
+        }
+      }
+    }
+  }
+  score += redThreat - blackThreat;
+
+  // 缺士怕车、缺象怕炮：士象的价值取决于对方还有多少攻击子力。
+  // 一个士对上一门车才值钱，双方都剩单车寡炮时缺士象并不致命。
+  score -= (2 - redAdvisor) * (blackRook * 50 + blackCannon * 15);
+  score -= (2 - redBishop) * (blackCannon * 35 + blackRook * 15);
+  score += (2 - blackAdvisor) * (redRook * 50 + redCannon * 15);
+  score += (2 - blackBishop) * (redCannon * 35 + redRook * 15);
 
   return score;
-}
-
-/** 统计某方仕+相的数量 */
-function countDefenders(board, side) {
-  var a = side === C.RED ? C.R_ADVISOR : C.B_ADVISOR;
-  var b = side === C.RED ? C.R_BISHOP : C.B_BISHOP;
-  var n = 0;
-  for (var i = 0; i < C.BOARD_SIZE; i++) {
-    var p = board[i];
-    if (p === a || p === b) n++;
-  }
-  return n;
-}
-
-function hasPieceType(board, piece) {
-  for (var i = 0; i < C.BOARD_SIZE; i++) {
-    if (board[i] === piece) return true;
-  }
-  return false;
 }
 
 /**
