@@ -196,6 +196,22 @@ Position.prototype.unmakeMove = function (undo) {
   this.moveCount--;
 };
 
+/**
+ * 空着：盘面不动，只把走子方交给对方（空着裁剪用）
+ *
+ * 与 makeMove/unmakeMove 一样同步维护 Zobrist 哈希里的走子方分量，
+ * 因此空着后的局面哈希不会与"真走了一手"的局面混淆。操作自逆。
+ */
+Position.prototype.makeNullMove = function () {
+  this.side = this.side === C.RED ? C.BLACK : C.RED;
+  this.hash = (this.hash ^ ZOBRIST.side) | 0;
+};
+
+/** 撤销空着（与 makeNullMove 是同一个自逆操作） */
+Position.prototype.unmakeNullMove = function () {
+  this.makeNullMove();
+};
+
 /** 创建一个可复用的撤销记录对象池 */
 Position.createUndoPool = function (size) {
   var pool = [];

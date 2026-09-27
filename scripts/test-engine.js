@@ -358,6 +358,17 @@ console.log('\n[11] 评估函数：对称性 + 将帅安全 / 缺士怕车');
     - EV.evaluate(new Position('3k5/9/9/9/9/9/9/9/9/3K1R3 w - - 0 1'));
   console.log('        士的边际价值：对方有车 ' + advisorWithRook + '，无车 ' + advisorNoRook);
   assert('缺士怕车：对方有车时士的边际价值更大', advisorWithRook > advisorNoRook, true);
+  // 机动性：马腿被塞 / 车路被挡。两组对照都特意选在**位置表分值相同**的格子上，
+  // 这样差值只来自机动性项，不会被 PST 掩盖。
+  var horseLegBlocked = EV.evaluate(new Position('3k5/9/9/9/9/3PN4/9/9/9/3K5 w - - 0 1')); // 兵在 (3,5)＝马腿
+  var horseLegClear = EV.evaluate(new Position('3k5/9/9/9/3P5/4N4/9/9/9/3K5 w - - 0 1'));   // 兵在 (3,6) 不是马腿
+  console.log('        马腿被塞 = ' + horseLegBlocked + '，腿通畅 = ' + horseLegClear);
+  assert('马腿被塞：评估更低', horseLegBlocked < horseLegClear, true);
+
+  var rookRayBlocked = EV.evaluate(new Position('3k5/9/9/9/9/5R3/5P3/9/9/3K5 w - - 0 1')); // 兵在车正前方
+  var rookRayOpen = EV.evaluate(new Position('3k5/9/9/9/9/5R3/3P5/9/9/3K5 w - - 0 1'));    // 兵挪到旁边
+  console.log('        车被挡住 = ' + rookRayBlocked + '，路通畅 = ' + rookRayOpen);
+  assert('车路被挡：评估更低', rookRayBlocked < rookRayOpen, true);
 })();
 
 console.log('\n----------------------------------------');

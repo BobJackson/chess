@@ -158,6 +158,23 @@ var KING_THREAT = [0, 0, 0, 0, 14, 26, 20, 8];
 /** 攻子离对方将帅多远以内才算威胁 */
 var KING_THREAT_RANGE = 3;
 
+// ---------------------------------------------------------------------------
+// 机动性 / 子力协调
+//
+// 象棋里"子力互相堵塞"是很实在的弱点：马腿被塞住，那个方向的两个落点直接废掉；
+// 车炮被自家子堵在角落里，摆着却发挥不出作用。这里用很便宜的方式近似：
+//   · 马：四个马腿各看一格，被占则该方向作废 → 扣分
+//   · 车/炮：沿四个方向数空格，每方向最多数 MOBILITY_CAP 格 → 加分
+// 只数前几格是有意的——评估在每个叶子节点都要跑，为了"精确机动性"遍历整条线不值。
+// ---------------------------------------------------------------------------
+
+/** 每个可走空格的分值 */
+var MOBILITY_UNIT = 2;
+/** 每个方向最多数几格 */
+var MOBILITY_CAP = 3;
+/** 每个被塞住的马腿折算成几格机动性 */
+var HORSE_LEG_BLOCKED = 3;
+
 /**
  * 数 (from, to) 之间（不含两端）有几个子：车要 0 个才直取，炮要恰好 1 个当炮架
  * @param {Array<number>} board
@@ -240,6 +257,30 @@ function evaluate(pos) {
       score += PIECE_VALUE[type] + positional;
     } else {
       score -= PIECE_VALUE[type] + positional;
+    }
+
+    // 机动性 / 子力堵塞：马腿被占、车炮的路被自家子挡住
+    if (type >= 4 && type <= 6) {
+      var pf = C.fileOf(i);
+      var pr = C.rankOf(i);
+      var mob = 0;
+      if (type === 4) {
+        if (pf > 0 && board[C.idxOf(pf - 1, pr)] !== C.EMPTY) mob -= HORSE_LEG_BLOCKED;
+        if (pf < 8 && board[C.idxOf(pf + 1, pr)] !== C.EMPTY) mob -= HORSE_LEG_BLOCKED;
+        if (pr > 0 && board[C.idxOf(pf, pr - 1)] !== C.EMPTY) mob -= HORSE_LEG_BLOCKED;
+        if (pr < 9 && board[C.idxOf(pf, pr + 1)] !== C.EMPTY) mob -= HORSE_LEG_BLOCKED;
+      } else {
+        var rays = C.RAY_DIRS[i];
+        for (var rd = 0; rd < 4; rd++) {
+          var ray = rays[rd];
+          var lim = ray.length < MOBILITY_CAP ? ray.length : MOBILITY_CAP;
+          for (var rk = 0; rk < lim; rk++) {
+            if (board[ray[rk]] !== C.EMPTY) break;
+            mob++;
+          }
+        }
+      }
+      if (mob !== 0) score += piece > 0 ? mob * MOBILITY_UNIT : -mob * MOBILITY_UNIT;
     }
 
     // 攻子威胁对方九宫：分两种情形
