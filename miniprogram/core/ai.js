@@ -24,10 +24,20 @@ var MAX_QPLY = 14;
 //
 // 晚走法削减（LMR）：排序做扎实之后才敢开——靠后的安静走法先减一层搜，
 // 只有抬升了 alpha 才按原深度补搜。上一轮在没有全排序时开它，等时对抗
-// 0 胜 4 负（好棋排在乱序里被随机砍掉）；全排序后重新验证。
+// 0 胜 4 负（好棋排在乱序里被随机砍掉）；全排序后重新验证 4 胜 2 负。
 var LMR_MIN_DEPTH = 4;
 var LMR_MIN_MOVES = 4;
 var LMR_REDUCTION = 1;
+
+// 空着裁剪（null-move）：不是将军、子力还够时，先假设自己不走一手让对方连走两步，
+// 若这样对手都翻不了盘就直接截断。象棋几乎没有被迫走子（困毙极罕见），原理上安全。
+//
+// 上一轮用 depth ≥ 3 / 削减 2 层试过，等时对抗 0 胜 4 负——那时"空着"后的搜索
+// 落在 depth ≤ 0，只剩静态搜索，"我不走对手也翻不了盘"这个判断太廉价。
+// 这一轮门槛提到 depth ≥ 5（空着后至少还搜 2 层），且排序已全排序。
+var NULL_MIN_DEPTH = 5;
+var NULL_REDUCTION = 2;
+var NULL_MIN_PIECES = 9;
 
 // ---------------------------------------------------------------------------
 // 置换表：固定 2^16 槽的扁平 typed-array 表，键为 Position 的 Zobrist 哈希
@@ -129,6 +139,8 @@ function createContext() {
     rootSide: 0,          // 根节点走子方，用于判定长将方
     pathHash: pathHash,   // 各层节点的局面哈希
     pathCheck: pathCheck, // 各层节点是否正被将军（1/0）
+    nullLock: false,      // true 表示当前在空着搜索内部（不再空着、不记路径）
+    pieces: 0,            // 盘上非将帅子力数，空着裁剪的门槛
     // 置换表本体：五条平行 typed-array，ttFlag 为 0 即空槽
     ttKey: new Int32Array(TT_SIZE),
     ttMove: new Int32Array(TT_SIZE),
@@ -170,6 +182,15 @@ function initSearch(ctx, root, disabled) {
   ctx.rootSide = root.side;
   ctx.pathHash[0] = root.hash;
   ctx.pathCheck[0] = 0;
+  ctx.nullLock = false;
+
+  // 空着裁剪的子力门槛：残局（子力太少）不空着，避免"空着判断"失真
+  var n = 0;
+  for (var i = 0; i < C.BOARD_SIZE; i++) {
+    var p = root.board[i];
+    if (p !== C.EMPTY && p !== C.R_KING && p !== C.B_KING) n++;
+  }
+  ctx.pieces = n;
 }
 
 function recordKiller(ctx, ply, move) {
@@ -419,7 +440,8 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
   // 重复局面：必须在置换表之前判定，重复分依赖路径、不进置换表。
   // 路径标记要先写入本层——判定要读 [first+1, ply] 整段的将军标记，其中含本层
   // （本层的标记描述的是"刚走的这一手是否将军"）。
-  if (!ctx.repDisabled) {
+  // 空着搜索内部不记账：空着不是真实着法，不该参与重复判定。
+  if (!ctx.repDisabled && !ctx.nullLock) {
     ctx.pathHash[ply] = pos.hash;
     ctx.pathCheck[ply] = inCheck;
     var rep = repetitionValue(pos, ply, ctx);
@@ -459,6 +481,20 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
 
   orderMoves(pos, ctx, start, end, ply);
 
+  // 空着裁剪：不是将军、子力还够、且不在空着搜索里时，先假设自己不走一手。
+  // 空着搜索给出的杀棋分不可信（它比真实着法弱），只用来截断。
+  if (depth >= NULL_MIN_DEPTH && !inCheck && !ctx.nullLock &&
+      ctx.pieces >= NULL_MIN_PIECES && beta < MATE - 1000) {
+    ctx.nullLock = true;
+    pos.makeNullMove();
+    var nullScore = -negamax(pos, depth - 1 - NULL_REDUCTION, -beta, -beta + 1, ply + 1, ctx);
+    pos.unmakeNullMove();
+    ctx.nullLock = false;
+    if (!ctx.aborted && nullScore >= beta) {
+      return nullScore > MATE - 1000 ? beta : nullScore;
+    }
+  }
+
   var undo = ctx.undoPool[ply];
   var best = -INF;
   var bestMove = stack[start];
@@ -471,6 +507,7 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     var quiet = pos.board[to] === C.EMPTY;
 
     pos.makeMove(from, to, undo);
+    if (!quiet) ctx.pieces--;
 
     var score;
     // 晚走法削减：全排序之后靠后的安静走法确实"不太可能好"，先减一层搜；
@@ -484,6 +521,7 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
       score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
     }
     pos.unmakeMove(undo);
+    if (!quiet) ctx.pieces++;
 
     if (ctx.aborted) break;
 
