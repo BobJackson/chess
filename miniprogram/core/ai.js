@@ -755,21 +755,34 @@ function pickMove(scored, topN, spread, noise, forceBest) {
 
 /**
  * 在候选中叠加随机扰动后挑选
+ *
+ * **只在"可信分值"的走法里挑**：窄窗口搜索里只有抬升过 alpha 的根走法拿到的是真实分，
+ * 其余只是"上界"——上界可以虚高，一旦参与随机挑选就会挑到坏棋。实测把中等档的抖动
+ * 从 0 调到 15（窄窗口），平均每步损失从 5 分飙到 **288 分**、51% 的步子亏两个兵以上；
+ * 同样的参数换成全窗口就回到 5 分。这正是"根走法择路"那个 bug 的翻版，只不过发生在
+ * 随机挑选这一步。全窗口搜索里所有走法都可信，pool 就是全体，行为不变。
+ *
  * @param {boolean} useSpread true 时用 spread 限制候选范围，false 时只取扰动后的第一名
  */
 function pickByNoise(scored, topN, spread, noise, useSpread) {
+  var pool = [];
+  for (var q = 0; q < scored.length; q++) {
+    if (!scored[q].bound) pool.push(scored[q]);
+  }
+  if (pool.length === 0) pool = scored; // 一个可信的都没有（极端局面）才退回全体
+
   if (noise <= 0) {
-    if (!useSpread) return scored[0].move;
+    if (!useSpread) return pool[0].move;
     var tied = [];
-    for (var t = 0; t < scored.length && tied.length < topN; t++) {
-      if (scored[0].score - scored[t].score <= spread) tied.push(scored[t]);
+    for (var t = 0; t < pool.length && tied.length < topN; t++) {
+      if (pool[0].score - pool[t].score <= spread) tied.push(pool[t]);
     }
     return tied[(Math.random() * tied.length) | 0].move;
   }
 
   var noisy = [];
-  for (var i = 0; i < scored.length; i++) {
-    noisy.push({ move: scored[i].move, score: scored[i].score + (Math.random() * 2 - 1) * noise });
+  for (var i = 0; i < pool.length; i++) {
+    noisy.push({ move: pool[i].move, score: pool[i].score + (Math.random() * 2 - 1) * noise });
   }
   noisy.sort(function (a, b) { return b.score - a.score; });
 

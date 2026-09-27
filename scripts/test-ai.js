@@ -476,6 +476,35 @@ console.log('\n[14] 择路回归：非全窗口搜索不得选中"分值虚高"�
   }
 })();
 
+console.log('\n[15] 随机挑选只认可信分值（窄窗口下不得挑到"上界虚高"的坏棋）');
+(function () {
+  // 同一个送马局面：窄窗口搜索里除了最优手，其余分值都是"上界"。若随机挑选
+  // （noise/topN）不区分可信分与上界，就会挑到上界虚高的坏棋——实测把中等档
+  // 的抖动调到 15，平均每步损失从 5 分飙到 288 分、51% 的步子亏两个兵以上。
+  // 这里用一份"窄窗口 + 重抖动"的临时配置压这条底线。
+  var fen = 'rnbakabr1/9/1c2c1n2/p1p1p1p1p/9/9/P1P1P1P1P/1C1C2N2/8R/RNBAKAB2 b - - 0 1';
+  var scored = AI.analyzeMoves(new Position(fen), 6, true);
+  var exact = {};
+  scored.forEach(function (s) { exact[s.move] = s.score; });
+  var best = scored[0].score;
+
+  var saved = AI.LEVELS.normal;
+  AI.LEVELS.normal = {
+    key: 'normal', label: '中等', depth: 6, time: 60000, exact: false,
+    noise: 40, topN: 3, spread: 0, blunder: 0, useBook: false, openingTopN: 1, openingSpread: 0
+  };
+  var worst = 0, n = 80;
+  for (var i = 0; i < n; i++) {
+    var r = AI.findBestMove(new Position(fen), { level: 'normal', moveNumber: 999 });
+    var loss = best - exact[r.move];
+    if (loss > worst) worst = loss;
+  }
+  AI.LEVELS.normal = saved;
+
+  console.log('        ' + n + ' 次随机挑选，最大单步损失 = ' + worst + ' 分（旧行为实测可达 944）');
+  truthy('窄窗口 + 重抖动：最大单步损失 < 150', worst < 150);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {
