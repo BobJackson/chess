@@ -12,6 +12,8 @@
  *
  * 选项：
  *   --depth N       固定搜索深度（默认 5；越深越慢，深度 6 约 2.5 倍）
+ *                  也可以写 A:B（如 --depth 7:6），给两边不同深度——用来做
+ *                  "等时补偿"：速度快的版本多算一层，看它是否仍不落下风。
  *   --positions N   局面套件大小（默认 59，即 118 局）
  *   --seed S        局面生成的随机种子（默认 20260927，保证可复现）
  *
@@ -31,11 +33,19 @@ var CORE_FILES = ['ai.js', 'constants.js', 'movegen.js', 'position.js', 'evaluat
   'book.js', 'mate.js', 'notation.js', 'game.js', 'ledger.js'];
 
 function parseArgs(argv) {
-  var o = { save: null, control: null, depth: 5, positions: 59, seed: 20260927 };
+  var o = { save: null, control: null, depthA: 5, depthB: 5, positions: 59, seed: 20260927 };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     if (a === '--save') o.save = argv[++i];
-    else if (a === '--depth') o.depth = parseInt(argv[++i], 10);
+    else if (a === '--depth') {
+      var d = String(argv[++i]);
+      if (d.indexOf(':') >= 0) {
+        o.depthA = parseInt(d.split(':')[0], 10);
+        o.depthB = parseInt(d.split(':')[1], 10);
+      } else {
+        o.depthA = o.depthB = parseInt(d, 10);
+      }
+    }
     else if (a === '--positions') o.positions = parseInt(argv[++i], 10);
     else if (a === '--seed') o.seed = parseInt(argv[++i], 10);
     else if (a.charAt(0) !== '-') o.control = a;
@@ -97,7 +107,7 @@ var PLY_CAP = 80;
 var WIN_MARGIN = 120;
 
 /** aIsRed=true 表示 A 执红。返回 'A' | 'B' | 'draw' */
-function play(A, B, fen, aIsRed, depth) {
+function play(A, B, fen, aIsRed, depthA, depthB) {
   var pos = new Position(fen);
   var undo = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
   var sigs = {};
@@ -109,9 +119,11 @@ function play(A, B, fen, aIsRed, depth) {
     var sig = pos.signature();
     sigs[sig] = (sigs[sig] || 0) + 1;
     if (sigs[sig] >= 3) { reason = '三次重复'; break; }
-    var eng = ((pos.side === C.RED) === aIsRed) ? A : B;
+    var aToMove = (pos.side === C.RED) === aIsRed;
+    var eng = aToMove ? A : B;
     var r = eng.findBestMove(pos, {
-      level: 'master', depth: depth, deterministic: true, useBook: false, moveNumber: 999
+      level: 'master', depth: aToMove ? depthA : depthB,
+      deterministic: true, useBook: false, moveNumber: 999
     });
     if (!r) { reason = '异常'; break; }
     pos.makeMove(MG.moveFrom(r.move), MG.moveTo(r.move), undo);
@@ -155,15 +167,18 @@ function main() {
   var aWin = 0, bWin = 0, draw = 0;
   fens.forEach(function (fen) {
     [true, false].forEach(function (aIsRed) {
-      var res = play(A, B, fen, aIsRed, o.depth);
+      var res = play(A, B, fen, aIsRed, o.depthA, o.depthB);
       if (res === 'A') aWin++;
       else if (res === 'B') bWin++;
       else draw++;
     });
   });
 
+  var depthText = o.depthA === o.depthB
+    ? String(o.depthA)
+    : ('当前 ' + o.depthA + ' / 对照 ' + o.depthB);
   console.log('确定性多局面对抗：当前 vs ' + o.control);
-  console.log('  固定深度 ' + o.depth + '，无随机化，' + fens.length + ' 局面 × 正反两色 = ' + (fens.length * 2) + ' 局');
+  console.log('  固定深度 ' + depthText + '，无随机化，' + fens.length + ' 局面 × 正反两色 = ' + (fens.length * 2) + ' 局');
   console.log('  当前 ' + aWin + ' 胜 ' + draw + ' 和 ' + bWin + ' 负  →  净 ' + (aWin - bWin));
   console.log('  （同引擎对照恒为净 0；净 ≥ 10 才算有信号，净 < 10 视为持平）');
 }
