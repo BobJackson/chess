@@ -205,7 +205,7 @@ Position.createUndoPool = function (size) {
   return pool;
 };
 
-/** 局面指纹，用于重复局面检测（不含走子方，重复判定另行组合） */
+/** 局面指纹：盘面 + 走子方，用于重复局面检测（同型局面 = 盘面与走子方都相同） */
 Position.prototype.signature = function () {
   var s = '';
   for (var i = 0; i < C.BOARD_SIZE; i++) {

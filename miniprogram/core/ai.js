@@ -152,16 +152,14 @@ function resetContext(ctx, deadline) {
 }
 
 /**
- * 初始化搜索路径上的重复局面判定
- *
- * 把根局面写进路径栈的第 0 层：搜索中任何一条走回根局面（或路径上其它局面）的
- * 变化，都能被识别为重复局面。根局面由本函数负责，ply ≥ 1 的节点由 negamax 写入。
+ * 初始化一次搜索需要的路径状态：把根局面写进第 0 层，搜索中任何一条走回根局面
+ *    （或路径上其它局面）的变化都能被识别；ply ≥ 1 的节点由 negamax 写入。
  *
  * @param {object} ctx 搜索上下文
  * @param {Position} root 根局面
- * @param {boolean} [disabled] true 时关闭判定（供对照测试与基准 A/B）
+ * @param {boolean} [disabled] true 时关闭重复局面判定（供对照测试与基准 A/B）
  */
-function initRepetition(ctx, root, disabled) {
+function initSearch(ctx, root, disabled) {
   ctx.repDisabled = !!disabled;
   ctx.rootSide = root.side;
   ctx.pathHash[0] = root.hash;
@@ -382,12 +380,14 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
   if ((ctx.nodes & 255) === 0 && Date.now() > ctx.deadline) ctx.aborted = true;
   if (ctx.aborted) return 0;
 
+  var inCheck = MG.isChecked(pos, pos.side) ? 1 : 0;
+
   // 重复局面：必须在置换表之前判定，重复分依赖路径、不进置换表。
   // 路径标记要先写入本层——判定要读 [first+1, ply] 整段的将军标记，其中含本层
-  // （本层的标记描述的是"刚走的这一手是否将军"）
+  // （本层的标记描述的是"刚走的这一手是否将军"）。
   if (!ctx.repDisabled) {
     ctx.pathHash[ply] = pos.hash;
-    ctx.pathCheck[ply] = MG.isChecked(pos, pos.side) ? 1 : 0;
+    ctx.pathCheck[ply] = inCheck;
     var rep = repetitionValue(pos, ply, ctx);
     if (rep !== null) return rep;
   }
@@ -434,8 +434,10 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     var move = stack[i];
     var from = MG.moveFrom(move);
     var to = MG.moveTo(move);
+    var quiet = pos.board[to] === C.EMPTY;
 
     pos.makeMove(from, to, undo);
+
     var score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
     pos.unmakeMove(undo);
 
@@ -449,7 +451,7 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
 
     if (alpha >= beta) {
       // 安静走法引发截断时记录杀手走法与历史分值
-      if (pos.board[to] === C.EMPTY) {
+      if (quiet) {
         recordKiller(ctx, ply, move);
         ctx.history[from * C.BOARD_SIZE + to] += depth * depth;
       }
@@ -506,7 +508,7 @@ function searchRoot(pos, depth, exact, ctx) {
       return null;
     }
 
-    moves.push({ move: move, score: score });
+    moves.push({ move: move, score: score, bound: !exact && !(score > alpha) });
     if (score > best) {
       best = score;
       bestMove = move;
@@ -517,8 +519,13 @@ function searchRoot(pos, depth, exact, ctx) {
   stack.length = start;
   ctx.bestAtPly[0] = bestMove;
 
-  // 同分时按走法编码定序，保证确定性模式与分片搜索（createSearch）的择路一致
-  moves.sort(function (a, b) { return b.score - a.score || a.move - b.move; });
+  // 非全窗口搜索里，只有真正抬升过 alpha 的走法拿到的是可信分值，其余只是"上界"。
+  // 上界可以恰好等于最优分，若让它参与同分比大小（按走法编码取小），
+  // 就可能让一手坏棋靠编码小中选——实测就是这样把马送掉的。所以可信分排在前面。
+  moves.sort(function (a, b) {
+    if (a.bound !== b.bound) return a.bound ? 1 : -1;
+    return b.score - a.score || a.move - b.move;
+  });
   return { scored: moves, bestScore: best, bestMove: bestMove };
 }
 
@@ -544,7 +551,7 @@ function findBestMove(pos, options) {
   var ctx = createContext();
   ctx.noTT = !!options.noTT;
   resetContext(ctx, deterministic ? Infinity : startTime + Math.max(100, level.time));
-  initRepetition(ctx, pos, options.noRep);
+  initSearch(ctx, pos, options.noRep);
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
   if (allMoves.length === 0) return null;
@@ -720,7 +727,7 @@ function getHint(pos) {
 function analyzeMoves(pos, depth, exact, noRep) {
   var ctx = createContext();
   resetContext(ctx, Date.now() + 60000);
-  initRepetition(ctx, pos, noRep);
+  initSearch(ctx, pos, noRep);
   var result = searchRoot(pos, depth || 3, exact === undefined ? true : exact, ctx);
   return result ? result.scored : [];
 }
@@ -768,7 +775,7 @@ function createSearch(pos, options) {
   var ctx = createContext();
   ctx.noTT = !!options.noTT;
   resetContext(ctx, totalDeadline);
-  initRepetition(ctx, pos, options.noRep);
+  initSearch(ctx, pos, options.noRep);
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
 
@@ -784,7 +791,7 @@ function createSearch(pos, options) {
     curIndex: 0,
     curScored: null,
     curAlpha: -INF,
-    prevScored: null,        // 上一完成阶段的 [{move,score}]（降序）
+    prevScored: null,        // 上一完成阶段的 [{move,score,bound}]（可信分在前，降序）
     bestMove: 0,
     bestScore: 0,
     varietyUsed: false,
@@ -845,6 +852,7 @@ function createSearch(pos, options) {
     st.curScored = [];
     st.curAlpha = -INF;
     st.depth = depth;
+    st.abortedRootMoves = 0;
   }
 
   /** 片内没搜完的根走法：沿用上一层分值，没有就按原顺序垫底 */
@@ -872,21 +880,33 @@ function createSearch(pos, options) {
     pos.unmakeMove(undo);
 
     if (ctx.aborted) {
+      // 被切片打断：沿用上一层分值，但标记为不可信（不与同层可信分值比大小）
       score = inheritedScore(move, st.curIndex);
       st.abortedRootMoves++;
-    } else if (!st.rootExact && score > st.curAlpha) {
-      st.curAlpha = score;
+      st.curScored.push({ move: move, score: score, bound: true });
+    } else {
+      // 只有抬升过 alpha 的走法拿到可信分值，其余只是上界
+      var credible = st.rootExact || score > st.curAlpha;
+      if (!st.rootExact && score > st.curAlpha) st.curAlpha = score;
+      st.curScored.push({ move: move, score: score, bound: !credible });
     }
-
-    st.curScored.push({ move: move, score: score });
     st.curIndex++;
     return true;
   }
 
-  /** 收一个迭代层：排序、更新最优、供下一层排序与超时继承使用 */
+  /**
+   * 收一个迭代层：排序、更新最优
+   *
+   * 排序时把"只有上界/旧分"的走法排到后面：被切片打断的走法沿用上一层旧分、
+   * 没抬升 alpha 的走法只拿到上界，都不该和同层可信分值比大小——否则它们
+   * 会靠"上界恰好等于最优分 + 编码小"中选，选出实际上很糟的着法。
+   */
   function finishPhase() {
     if (!st.curScored || !st.curScored.length) { st.rootMoves = null; return false; }
-    st.curScored.sort(function (a, b) { return b.score - a.score || a.move - b.move; });
+    st.curScored.sort(function (a, b) {
+      if (a.bound !== b.bound) return a.bound ? 1 : -1;
+      return b.score - a.score || a.move - b.move;
+    });
     st.prevScored = st.curScored;
     st.bestMove = st.curScored[0].move;
     st.bestScore = st.curScored[0].score;
