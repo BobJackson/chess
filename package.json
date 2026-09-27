@@ -20,6 +20,8 @@
     "smoke:ws": "node scripts/ws-smoke.js",
     "test:audio": "node scripts/test-audio.js",
     "test:page": "node scripts/test-page.js",
+    "bench:levels": "node scripts/bench-levels.js",
+    "bench:games": "node scripts/bench-levels.js --games 1",
     "gen:sfx": "node scripts/gen-sfx.js",
     "gen:bgm": "node scripts/gen-bgm.js",
     "gen:voice": "node scripts/gen-mate-voice.js"

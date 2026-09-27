@@ -22,3 +22,4 @@ project.private.config.json
 
 # WorkBuddy 本地工作区数据
 .workbuddy/
+.workbuddy-ai/

@@ -1,7 +1,8 @@
 /**
  * AI 引擎测试与基准（node scripts/test-ai.js）
  *
- * 覆盖：各难度出招耗时、战术识别（白吃子 / 一步杀）、自我对弈完整性。
+ * 覆盖：各难度出招耗时、战术识别（白吃子 / 一步杀）、自我对弈完整性、
+ *       重复局面判定（双方不变作和 / 单方长将判负）。
  */
 
 var Position = require('../miniprogram/core/position.js');
@@ -362,6 +363,75 @@ console.log('\n[11] 置换表：同等深度更少节点、结果不变');
   var sliced = AI.runSearch(midgame(), opt, 500);
   truthy('分片搜索置换表命中', sliced && sliced.ttHits > 0);
   assert('分片/同步走法一致', sliced.move, withTT.move);
+})();
+
+console.log('\n[12] 重复局面：长将判负（构造的 4 手循环）');
+(function () {
+  // 循环：红车 (3,3) 与黑将 (4,0)/(3,0) 之间来回，黑方每步都被将军、只有唯一应着，
+  // 红方则每手都在将军 —— 按规则属"单方长将"，红方判负。
+  // 黑方另有一车（红方净亏一车），所以红方"看起来唯一能求和"的路子就是这条长将。
+  var ROOT = '4kr3/9/9/3R5/9/5P2r/9/9/9/5K3 w - - 0 1';
+  var AFTER_CHECK = '4kr3/9/9/4R4/9/5P2r/9/9/9/5K3 b - - 0 1'; // 红车将军后
+  var AFTER_KING = '3k1r3/9/9/4R4/9/5P2r/9/9/9/5K3 w - - 0 1'; // 黑将应着后
+  var AFTER_CHECK2 = '3k1r3/9/9/3R5/9/5P2r/9/9/9/5K3 b - - 0 1'; // 红车再将军
+
+  // 先确认构造确实"逼和"：黑方在被将军时只有唯一应着
+  assert('黑将被将军时只有唯一应着', MG.genLegalMoves(new Position(AFTER_CHECK), C.BLACK).length, 1);
+  assert('黑将再被将军时只有唯一应着', MG.genLegalMoves(new Position(AFTER_CHECK2), C.BLACK).length, 1);
+
+  // 再确认四手循环确实回到根局面（否则测的不是重复局面）
+  var pos = new Position(ROOT);
+  var undo = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
+  var cycle = [
+    [C.idxOf(3, 3), C.idxOf(4, 3)], // 红车将军
+    [C.idxOf(4, 0), C.idxOf(3, 0)], // 黑将唯一应着
+    [C.idxOf(4, 3), C.idxOf(3, 3)], // 红车再将军
+    [C.idxOf(3, 0), C.idxOf(4, 0)]  // 黑将唯一应着
+  ];
+  cycle.forEach(function (mv) { pos.makeMove(mv[0], mv[1], undo); });
+  assert('四手循环回到根局面', pos.signature(), new Position(ROOT).signature());
+
+  // 长将线必须被判负，而不是被当成和棋（0 分）——否则引擎会主动走进长将
+  var checkMove = MG.packMove(C.idxOf(3, 3), C.idxOf(4, 3));
+  var scored = AI.analyzeMoves(new Position(ROOT), 6, true);
+  var best = null;
+  for (var i = 0; i < scored.length; i++) if (scored[i].move === checkMove) best = scored[i];
+  console.log('        长将那一手分值 = ' + (best ? best.score : 'null') + '（和棋会是 0，判负应明显为负）');
+  truthy('长将那一手被判负而不是和棋', best && best.score < -300);
+
+  // 分片搜索（对局实际使用的路径）同样要算出长将判负
+  var sliced = AI.runSearch(new Position(ROOT), { level: 'hard', moveNumber: 999, useBook: false }, 50);
+  truthy('分片搜索同样避开长将', sliced && sliced.score < -300);
+})();
+
+console.log('\n[13] 重复局面：长将判负 / 双方长将 / 不变作和（规则单元测试）');
+(function () {
+  // 直接铺设一条 4 手循环的路径标记，验证循环段的判定结果。
+  // pathCheck[k] = 第 k 层"刚走的这一手是否将军"；根节点走子方在奇数层落子。
+  function judge(rootSide, checks, ply, sideFen) {
+    var ctx = AI.createContext();
+    ctx.rootSide = rootSide;
+    for (var k = 0; k <= ply; k++) {
+      ctx.pathHash[k] = k + 1;
+      ctx.pathCheck[k] = checks[k] || 0;
+    }
+    return AI.repeatSegmentValue(0, ply, new Position(sideFen), ctx);
+  }
+  var RED_TURN = '4kr3/9/9/3R5/9/5P2r/9/9/9/5K3 w - - 0 1';
+  var BLACK_TURN = '4kr3/9/9/3R5/9/5P2r/9/9/9/5K3 b - - 0 1';
+
+  // 红方每手将军、黑方从不将军 → 红方长将判负（轮到红走时是负的杀棋分）
+  var a = judge(C.RED, [0, 1, 0, 1, 0], 4, RED_TURN);
+  truthy('单方长将：长将方判负', a < -AI.MATE + 1000);
+  assert('单方长将：分值随层数收敛', a, -AI.MATE + 4);
+  // 同一循环若轮到黑方走，红方长将判负 → 黑方视角为正
+  truthy('单方长将：对方视角为正', judge(C.RED, [0, 1, 0, 1, 0], 4, BLACK_TURN) > AI.MATE - 1000);
+  // 双方都在将军 → 双方长将，不变作和
+  assert('双方长将：判和', judge(C.RED, [0, 1, 1, 1, 1], 4, RED_TURN), 0);
+  // 双方都不将军（纯粹往返走子）→ 不变作和
+  assert('双方都不将军：判和', judge(C.RED, [0, 0, 0, 0, 0], 4, RED_TURN), 0);
+  // 黑方每手将军、红方不将军 → 黑方长将判负，红方视角为正
+  truthy('对方长将：我方视角为正', judge(C.RED, [0, 0, 1, 0, 1], 4, RED_TURN) > AI.MATE - 1000);
 })();
 
 console.log('\n----------------------------------------');

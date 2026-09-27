@@ -99,6 +99,14 @@ function createContext() {
   var hashMove = [];
   for (i = 0; i < MAX_PLY + MAX_QPLY + 4; i++) hashMove.push(0);
 
+  // 重复局面判定用的路径栈：索引即 ply，每个节点进入时覆盖写入
+  var pathHash = [];
+  var pathCheck = [];
+  for (i = 0; i < MAX_PLY + MAX_QPLY + 4; i++) {
+    pathHash.push(0);
+    pathCheck.push(0);
+  }
+
   return {
     undoPool: Position.createUndoPool(MAX_PLY + MAX_QPLY + 8),
     filterUndo: { from: 0, to: 0, piece: 0, captured: 0, side: 0 },
@@ -110,6 +118,11 @@ function createContext() {
     bestAtPly: bestAtPly,
     // 置换表命中的走法（按 ply），排序优先级高于 PV 走法
     hashMove: hashMove,
+    // 重复局面判定：路径栈索引即 ply，节点进入时覆盖写入
+    repDisabled: false,   // true 时关闭判定（供对照测试与基准 A/B）
+    rootSide: 0,          // 根节点走子方，用于判定长将方
+    pathHash: pathHash,   // 各层节点的局面哈希
+    pathCheck: pathCheck, // 各层节点是否正被将军（1/0）
     // 置换表本体：五条平行 typed-array，ttFlag 为 0 即空槽
     ttKey: new Int32Array(TT_SIZE),
     ttMove: new Int32Array(TT_SIZE),
@@ -136,6 +149,23 @@ function resetContext(ctx, deadline) {
   ctx.nodes = 0;
   ctx.deadline = deadline;
   ctx.aborted = false;
+}
+
+/**
+ * 初始化搜索路径上的重复局面判定
+ *
+ * 把根局面写进路径栈的第 0 层：搜索中任何一条走回根局面（或路径上其它局面）的
+ * 变化，都能被识别为重复局面。根局面由本函数负责，ply ≥ 1 的节点由 negamax 写入。
+ *
+ * @param {object} ctx 搜索上下文
+ * @param {Position} root 根局面
+ * @param {boolean} [disabled] true 时关闭判定（供对照测试与基准 A/B）
+ */
+function initRepetition(ctx, root, disabled) {
+  ctx.repDisabled = !!disabled;
+  ctx.rootSide = root.side;
+  ctx.pathHash[0] = root.hash;
+  ctx.pathCheck[0] = 0;
 }
 
 function recordKiller(ctx, ply, move) {
@@ -270,10 +300,97 @@ function ttReadScore(score, ply) {
   return score;
 }
 
+// ---------------------------------------------------------------------------
+// 重复局面：双方不变作和 / 单方长将判负
+//
+// 与 core/game.js 的终局判定同一套规则（同型局面 = 盘面 + 走子方相同）：
+// 循环段内单方每手都在将军而对方没有 → 该方长将判负；否则双方不变作和。
+//
+// 搜索里提前一拍生效——同型局面在搜索路径上第二次出现就按上述规则给分。
+// 这样做有三个好处：
+//   ① 引擎不再把"走回去"当成新变化反复计算，也就不会出现走一步、
+//      下一步又撤销自己的往返走子；
+//   ② 优势方不会主动走进重复和棋（和棋 0 分低于它的优势分），
+//      劣势方则会主动争取和棋；
+//   ③ 长将判负能被算出来，引擎不会把长将当成和棋去走。
+//
+// 只认搜索树内的循环（含"走回根局面"）：循环段的每一手是否将军都看得见，
+// 长将才判得准；分值也不依赖对局外的信息，对局、提示、分析各调用方行为一致。
+// 分值不写入置换表：它依赖搜索路径，换个路径就不成立。
+// ---------------------------------------------------------------------------
+
+/**
+ * 判定当前节点是否构成重复局面
+ *
+ * @param {Position} pos 当前局面
+ * @param {number} ply 当前层
+ * @param {object} ctx 搜索上下文
+ * @returns {?number} 重复局面的分值；null 表示不构成重复
+ */
+function repetitionValue(pos, ply, ctx) {
+  if (ctx.repDisabled) return null;
+  var hash = pos.hash;
+  // 同型局面必然出现在相隔偶数层的节点上（走子方要相同），故隔层回扫
+  for (var i = ply - 2; i >= 0; i -= 2) {
+    if (ctx.pathHash[i] === hash) return repeatSegmentValue(i, ply, pos, ctx);
+  }
+  return null;
+}
+
+/**
+ * 循环段 [first+1, ply] 的长将判定，规则与 core/game.js 的 _perpetualCheckSide 一致
+ *
+ * @param {number} first 同型局面上一次出现在搜索路径上的层号
+ * @param {number} ply 当前层
+ * @param {Position} pos 当前局面
+ * @param {object} ctx 搜索上下文
+ * @returns {number} 不变作和为 0；单方长将时给出该方判负的杀棋分
+ */
+function repeatSegmentValue(first, ply, pos, ctx) {
+  // 根节点走子方在奇数层落子，另一方在偶数层落子
+  var mover = ctx.rootSide;
+  var moverTotal = 0;
+  var moverCheck = 0;
+  var foeTotal = 0;
+  var foeCheck = 0;
+
+  for (var k = first + 1; k <= ply; k++) {
+    if ((k & 1) === 1) {
+      moverTotal++;
+      if (ctx.pathCheck[k]) moverCheck++;
+    } else {
+      foeTotal++;
+      if (ctx.pathCheck[k]) foeCheck++;
+    }
+  }
+
+  // 长将方：-1 表示双方都没长将（注意 C.RED 就是 0，不能用 0 当哨兵）
+  var perpetual = -1;
+  if (moverTotal > 0 && moverCheck === moverTotal && foeCheck === 0) {
+    perpetual = mover;
+  } else if (foeTotal > 0 && foeCheck === foeTotal && moverCheck === 0) {
+    perpetual = mover === C.RED ? C.BLACK : C.RED;
+  }
+  if (perpetual < 0) return 0;
+
+  // 长将方判负，量纲与引擎其它杀棋分一致（从当前节点走子方视角）
+  return pos.side === perpetual ? -MATE + ply : MATE - ply;
+}
+
 function negamax(pos, depth, alpha, beta, ply, ctx) {
   ctx.nodes++;
   if ((ctx.nodes & 255) === 0 && Date.now() > ctx.deadline) ctx.aborted = true;
   if (ctx.aborted) return 0;
+
+  // 重复局面：必须在置换表之前判定，重复分依赖路径、不进置换表。
+  // 路径标记要先写入本层——判定要读 [first+1, ply] 整段的将军标记，其中含本层
+  // （本层的标记描述的是"刚走的这一手是否将军"）
+  if (!ctx.repDisabled) {
+    ctx.pathHash[ply] = pos.hash;
+    ctx.pathCheck[ply] = MG.isChecked(pos, pos.side) ? 1 : 0;
+    var rep = repetitionValue(pos, ply, ctx);
+    if (rep !== null) return rep;
+  }
 
   if (depth <= 0 || ply >= MAX_PLY) {
     return quiesce(pos, alpha, beta, ply, 0, ctx);
@@ -413,6 +530,7 @@ function searchRoot(pos, depth, exact, ctx) {
  *        deterministic 为 true 时关闭时间截止与全部随机化，结果可复现（供测试/回放）
  *        depth 覆盖难度的最大搜索深度，0/省略表示用难度自带值
  *        noTT 为 true 时关闭置换表（供对照测试）
+ *        noRep 为 true 时关闭重复局面判定（供对照测试与基准 A/B）
  * @returns {?{move:number, from:number, to:number, score:number, depth:number,
  *              nodes:number, time:number, mateIn:number, blunder:boolean}}
  */
@@ -426,6 +544,7 @@ function findBestMove(pos, options) {
   var ctx = createContext();
   ctx.noTT = !!options.noTT;
   resetContext(ctx, deterministic ? Infinity : startTime + Math.max(100, level.time));
+  initRepetition(ctx, pos, options.noRep);
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
   if (allMoves.length === 0) return null;
@@ -595,11 +714,13 @@ function getHint(pos) {
  * @param {Position} pos
  * @param {number} [depth=3]
  * @param {boolean} [exact=true] true 时全窗口搜索，每个走法均为精确分值
+ * @param {boolean} [noRep] true 时关闭重复局面判定（供对照测试）
  * @returns {Array<{move:number,score:number}>}
  */
-function analyzeMoves(pos, depth, exact) {
+function analyzeMoves(pos, depth, exact, noRep) {
   var ctx = createContext();
   resetContext(ctx, Date.now() + 60000);
+  initRepetition(ctx, pos, noRep);
   var result = searchRoot(pos, depth || 3, exact === undefined ? true : exact, ctx);
   return result ? result.scored : [];
 }
@@ -631,7 +752,7 @@ function evaluatePosition(pos) {
  * 主线程可以安全地继续渲染同一个 pos。
  *
  * @param {Position} pos 局面（side 即需要走子的一方）
- * @param {object} [options] 同 findBestMove（level/moveNumber/deterministic/depth/useBook）
+ * @param {object} [options] 同 findBestMove（level/moveNumber/deterministic/depth/useBook/noTT/noRep）
  * @returns {{step:function(number=):boolean, cancel:function(),
  *            isDone:function():boolean, getResult:function():?object, state:object}}
  *          step 返回 true 表示搜索结束（getResult 取结果，形状同 findBestMove）；
@@ -647,6 +768,7 @@ function createSearch(pos, options) {
   var ctx = createContext();
   ctx.noTT = !!options.noTT;
   resetContext(ctx, totalDeadline);
+  initRepetition(ctx, pos, options.noRep);
 
   var allMoves = MG.genLegalMoves(pos, pos.side);
 
@@ -903,5 +1025,7 @@ module.exports = {
   getHint: getHint,
   analyzeMoves: analyzeMoves,
   evaluatePosition: evaluatePosition,
-  createContext: createContext
+  createContext: createContext,
+  // 重复局面判定（长将判负 / 不变作和），导出供测试直接验证规则
+  repeatSegmentValue: repeatSegmentValue
 };
