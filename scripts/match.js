@@ -91,23 +91,108 @@ function makeRng(seed) {
   };
 }
 
+// 初始布局（每格一个字符，'' 为空），用于"按类型成对删子"构造残局
+var INIT_GRID = [
+  ['r', 'n', 'b', 'a', 'k', 'a', 'b', 'n', 'r'],
+  ['', '', '', '', '', '', '', '', ''],
+  ['', 'c', '', '', '', '', '', 'c', ''],
+  ['p', '', 'p', '', 'p', '', 'p', '', 'p'],
+  ['', '', '', '', '', '', '', '', ''],
+  ['', '', '', '', '', '', '', '', ''],
+  ['P', '', 'P', '', 'P', '', 'P', '', 'P'],
+  ['', 'C', '', '', '', '', '', 'C', ''],
+  ['', '', '', '', '', '', '', '', ''],
+  ['R', 'N', 'B', 'A', 'K', 'A', 'B', 'N', 'R']
+];
+
+/** 把 10×9 字符网格编成 FEN（红先） */
+function gridToFen(grid) {
+  var rows = [];
+  for (var r = 0; r < 10; r++) {
+    var s = '', empty = 0;
+    for (var f = 0; f < 9; f++) {
+      var c = grid[r][f];
+      if (!c) { empty++; continue; }
+      if (empty) { s += empty; empty = 0; }
+      s += c;
+    }
+    if (empty) s += empty;
+    rows.push(s);
+  }
+  return rows.join('/') + ' w - - 0 1';
+}
+
+/**
+ * 残局局面：**从初始布局按类型成对删子**（双方保留同样数量 → 天然均势）。
+ *
+ * 为什么不用"随机走很多手"：纯随机走几乎不减子力（实测 3000 次全 > 3500）；改成
+ * "优先吃子"又会一路换到底，把车马炮全换光（只剩士象兵）——那样**马炮残局调整照样
+ * 走不到**。删子法既能控子力总量，又能保证留下攻子。
+ */
+function genEndgameFens(rng, count) {
+  var out = [];
+  var seen = {};
+  var guard = 0;
+  while (out.length < count && guard++ < count * 400) {
+    var keepR = (rng() * 3) | 0, keepN = (rng() * 3) | 0, keepC = (rng() * 3) | 0;
+    var keepA = (rng() * 3) | 0, keepB = (rng() * 3) | 0, keepP = (rng() * 6) | 0;
+    var perSide = keepR * 900 + keepN * 400 + keepC * 450 + keepA * 200 + keepB * 200 + keepP * 70;
+    var total = perSide * 2;
+    if (total < 500 || total >= EV.ENDGAME_MATERIAL) continue;
+    if (keepR + keepN + keepC === 0) continue; // 至少留一个攻子，否则马炮项又走不到
+
+    // 深拷贝初始布局，按类型随机保留 keepX 个（双方对称）
+    var grid = [];
+    for (var r = 0; r < 10; r++) grid.push(INIT_GRID[r].slice());
+    var picks = [
+      ['R', 'r', keepR], ['N', 'n', keepN], ['C', 'c', keepC],
+      ['A', 'a', keepA], ['B', 'b', keepB], ['P', 'p', keepP]
+    ];
+    for (var pi = 0; pi < picks.length; pi++) {
+      var red = picks[pi][0], black = picks[pi][1], keep = picks[pi][2];
+      [red, black].forEach(function (ch) {
+        var cells = [];
+        for (var rr = 0; rr < 10; rr++) {
+          for (var ff = 0; ff < 9; ff++) if (grid[rr][ff] === ch) cells.push([rr, ff]);
+        }
+        // 随机洗牌后把多余的清掉
+        for (var i = cells.length - 1; i > 0; i--) {
+          var j = (rng() * (i + 1)) | 0;
+          var tmp = cells[i]; cells[i] = cells[j]; cells[j] = tmp;
+        }
+        for (var k = keep; k < cells.length; k++) grid[cells[k][0]][cells[k][1]] = '';
+      });
+    }
+
+    var fen = gridToFen(grid);
+    var pos = new Position(fen);
+    if (MG.isChecked(pos, pos.side)) continue;
+    var key = fen.split(' ')[0] + ' ' + fen.split(' ')[1];
+    if (seen[key]) continue;
+    seen[key] = 1;
+    out.push(fen);
+  }
+  return out;
+}
+
 /**
  * 生成局面。
- * @param {string} [phase] 'mid'（默认）随机走 10~23 手；'end' 走 40~70 手，且要求
- *        双方子力和 < ENDGAME_MATERIAL、双方子力差 ≤ 200（大致均势）。
- *        加 'end' 是必须的：只测中局的话，**残局相关的评估项（兵值缩放、马炮残局调整、
- *        残局系数）根本不会被走到**——2026-09-28 查出来套件里 50 个局面全是非残局。
+ * @param {string} [phase] 'mid'（默认）随机走 10~23 手；'end' 残局（按类型成对删子，
+ *        双方子力和 < ENDGAME_MATERIAL、子力相等）。
+ *
+ * 为什么必须有 'end'：只测中局的话**残局相关的评估项（兵值缩放、马炮残局调整、
+ * 残局系数）根本不会被走到**——2026-09-28 查出来默认套件 50 个局面全是非残局。
  */
 function genPositions(rng, count, phase) {
-  var endgame = phase === 'end';
+  if (phase === 'end') return genEndgameFens(rng, count);
+
   var seen = {};
   var fens = [];
   var guard = 0;
-  var guardMax = count * (endgame ? 400 : 40);
-  while (fens.length < count && guard++ < guardMax) {
+  while (fens.length < count && guard++ < count * 40) {
     var pos = new Position();
     var undo = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
-    var target = endgame ? 40 + ((rng() * 31) | 0) : 10 + ((rng() * 14) | 0);
+    var target = 10 + ((rng() * 14) | 0);
     for (var ply = 0; ply < target; ply++) {
       var legal = MG.genLegalMoves(pos, pos.side);
       if (!legal.length) break;
@@ -115,12 +200,6 @@ function genPositions(rng, count, phase) {
       pos.makeMove(MG.moveFrom(mv), MG.moveTo(mv), undo);
     }
     if (MG.isChecked(pos, pos.side)) continue;
-    if (endgame) {
-      if (totalMaterial(pos) >= EV.ENDGAME_MATERIAL) continue;
-      var md = material(pos);
-      if (md < 0) md = -md;
-      if (md > 200) continue;
-    }
     var fen = pos.toFen();
     var key = fen.split(' ')[0] + ' ' + fen.split(' ')[1];
     if (seen[key]) continue;
@@ -269,8 +348,15 @@ function main() {
   // 跑一套局面，返回胜负和
   function runSuite(seed, positions) {
     var fens = genPositions(makeRng(seed), positions, 'mid');
+    if (fens.length < positions) {
+      console.log('  ⚠ 中局局面只生成出 ' + fens.length + '/' + positions + ' 个');
+    }
     if (o.endgame > 0) {
-      fens = fens.concat(genPositions(makeRng(seed ^ 0x5bf03635), o.endgame, 'end'));
+      var ef = genPositions(makeRng(seed ^ 0x5bf03635), o.endgame, 'end');
+      if (ef.length < o.endgame) {
+        console.log('  ⚠ 残局局面只生成出 ' + ef.length + '/' + o.endgame + ' 个（结果仍有效，但"残局占比"没有标称的那么高）');
+      }
+      fens = fens.concat(ef);
     }
     var a = 0, b = 0, d = 0;
     fens.forEach(function (fen) {
@@ -305,8 +391,10 @@ function main() {
       results.forEach(function (r, idx) {
         if (!r) { console.log('  套件 ' + (idx + 1) + '：跑失败'); return; }
         nets.push(r.a - r.b);
+        var want = (o.positions + o.endgame) * 2;
+        var short = r.n !== want ? '  ⚠ 只跑了 ' + r.n + '/' + want + ' 局' : '';
         console.log('  套件 ' + (idx + 1) + '（种子 ' + seeds[idx] + '）：净 ' +
-          String(r.a - r.b).padStart(4) + '   ' + r.a + '胜/' + r.d + '和/' + r.b + '负');
+          String(r.a - r.b).padStart(4) + '   ' + r.a + '胜/' + r.d + '和/' + r.b + '负' + short);
       });
       if (!nets.length) return;
       var sum = 0, min = nets[0], max = nets[0], pos = 0, neg = 0, zero = 0;
@@ -329,7 +417,8 @@ function main() {
 
     seeds.forEach(function (sd, idx) {
       var args = [o.control, '--positions', String(o.positions), '--seed', String(sd),
-        '--json', '--level', o.levelA + ':' + o.levelB];
+        '--json', '--level', o.levelA + ':' + o.levelB,
+        '--endgame', String(o.endgame)];
       if (o.depthA) args.push('--depth', o.depthA + ':' + (o.depthB || o.depthA));
       var ch = cp.fork(__filename, args, { silent: true });
       var buf = '';
