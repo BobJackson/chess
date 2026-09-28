@@ -34,7 +34,7 @@ var MATE_VOICE_DELAY = 1000;
  *
  * 分片搜索（core/ai.js createSearch）每片最多占用这么久就让出主线程，
  * 配合 setTimeout(0) 的间隔，UI 能保持约 60fps 渲染「思考中」，
- * 大师档 8 层搜索也不再整段冻屏。
+ * 大师档 10 层搜索也不再整段冻屏。
  */
 var AI_SLICE_MS = 12;
 

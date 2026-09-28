@@ -280,13 +280,17 @@ console.log('\n[9] 分片搜索：与同步搜索确定性一致');
     } }
   ];
 
-  // exact 难度（简单，全窗口）：确定性模式下分片与同步必须逐分一致
+  // exact 难度（简单，全窗口）：确定性模式下分片与同步必须逐分一致。
+  // 注意第三个参数是**切片毫秒数**，这里给一个很大的值：分片路径在"单个根走法被切片
+  // 打断"时会沿用上一层迭代的分值（见 README「分片搜索的根走法」），所以小切片下结果
+  // 依赖墙钟、逐分一致这个断言会偶发失败。给大切片 = 让每个根走法都搜完，测的才是
+  // 这条断言真正想保证的东西（搜索跑到底时分片与同步等价）。
   var exactOk = true;
   var exactScoreOk = true;
   spots.forEach(function (s) {
     var opt = { level: 'easy', moveNumber: 999, useBook: false, deterministic: true };
     var a = AI.findBestMove(s.make(), opt);
-    var b = AI.runSearch(s.make(), opt);
+    var b = AI.runSearch(s.make(), opt, 60000);
     if (!b || a.move !== b.move) exactOk = false;
     if (!b || a.score !== b.score) exactScoreOk = false;
   });

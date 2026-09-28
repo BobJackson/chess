@@ -85,6 +85,13 @@ var TT_UPPER = 3;
  *  useBook       —— 开局阶段是否查询开局库
  *  openingTopN   —— 开局前两手用于制造变化的候选数（配合浅层精确搜索）
  *  openingSpread —— 开局候选的分差容忍度
+ *
+ * 深度阶梯是 **2 / 4 / 6 / 8 / 10（等距 2 层）**。2026-09-28 重定：这几档的上限是当年
+ * 按慢引擎定的，几轮搜索优化（全排序 + LMR + 空着裁剪 + TT + PVS + futility）之后
+ * 引擎快了一个量级——实测中等档只用掉 1.5s 预算里的 19ms、困难档 2600ms 里的 133ms，
+ * **卡住强度的是深度上限而不是速度**（详见 README「难度档位的深度上限重定」）。
+ * 而「难度阶梯验证」实测**每 2 层 ≈ 净 +20 局**，所以等距 2 层 = 难度均匀。
+ * 时限不变（那是产品定的等待容忍度），各档都还留着余量。
  */
 var LEVELS = {
   beginner: {
@@ -92,15 +99,15 @@ var LEVELS = {
     noise: 90, topN: 6, spread: 180, blunder: 0.35, useBook: false, openingTopN: 6, openingSpread: 180
   },
   easy: {
-    key: 'easy', label: '简单', depth: 3, time: 800, exact: true,
+    key: 'easy', label: '简单', depth: 4, time: 800, exact: true,
     noise: 50, topN: 4, spread: 120, blunder: 0.12, useBook: true, openingTopN: 4, openingSpread: 120
   },
   normal: {
-    key: 'normal', label: '中等', depth: 4, time: 1500, exact: false,
+    key: 'normal', label: '中等', depth: 6, time: 1500, exact: false,
     noise: 0, topN: 1, spread: 0, blunder: 0, useBook: true, openingTopN: 3, openingSpread: 25
   },
   hard: {
-    key: 'hard', label: '困难', depth: 6, time: 2600, exact: false,
+    key: 'hard', label: '困难', depth: 8, time: 2600, exact: false,
     noise: 0, topN: 1, spread: 0, blunder: 0, useBook: true, openingTopN: 2, openingSpread: 12
   },
   master: {

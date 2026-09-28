@@ -130,4 +130,9 @@ rows.forEach(function (r) {
 });
 console.log('\n  平均损失 = 实际选中手比"最优手"差多少分（百分之一子），越大越弱');
 console.log('  大漏着率 = 单步损失 ≥ 200（两个兵）的比例');
-console.log('  注：master 的深度(8)高于基准(' + o.baseDepth + ')，它的损失会被高估（偶尔为负）；看排序即可。');
+var above = AI.LEVEL_ORDER.filter(function (k) { return AI.LEVELS[k].depth >= o.baseDepth; })
+  .map(function (k) { return AI.LEVELS[k].label + '(d' + AI.LEVELS[k].depth + ')'; });
+if (above.length) {
+  console.log('  注：' + above.join('、') + ' 的深度已达到或超过基准(' + o.baseDepth +
+    ')，它们的损失会被高估（偶尔为负）；看排序即可。');
+}
