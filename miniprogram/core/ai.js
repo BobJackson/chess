@@ -449,7 +449,17 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
   }
 
   if (depth <= 0 || ply >= MAX_PLY) {
-    return quiesce(pos, alpha, beta, ply, 0, ctx);
+    // 将军延伸：静态搜索只生成吃子（genPseudoMoves 的 capturesOnly），碰上
+    // "被将军但没有吃子可走"的局面会直接返回静态评估——等于没看见自己被将；
+    // 被将死 / 困毙也会被当成普通局面估分（这是水平线效应最要命的一种）。
+    // 所以被将军时不下沉到静态搜索，改为再搜一层，让应将被真正搜到。
+    // 护栏：ply 接近 MAX_PLY 时不再延，避免连将把搜索拖爆；空着搜索里不延
+    // （空着之后的"被将"不是真实局面）。
+    if (inCheck && depth <= 0 && ply < MAX_PLY - 4 && !ctx.nullLock) {
+      depth = 1;
+    } else {
+      return quiesce(pos, alpha, beta, ply, 0, ctx);
+    }
   }
 
   // 置换表探测：层数足够时按旗标直接取值；不足也借它的走法排序

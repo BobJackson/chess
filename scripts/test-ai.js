@@ -523,6 +523,21 @@ console.log('\n[15] 随机挑选只认可信分值（窄窗口下不得挑到"�
   truthy('窄窗口 + 重抖动：最大单步损失 < 150', worst < 150);
 })();
 
+console.log('\n[16] 将军延伸：水平线上的将死必须被看见');
+(function () {
+  // 静态搜索只生成吃子（genPseudoMoves 的 capturesOnly），所以"被将军但无吃子可走"
+  // 的局面会直接返回静态评估——被将死 / 困毙也会被当成普通局面估分。加了将军延伸
+  // 之后，被将军时不下沉到静态搜索，改为再搜一层。
+  // 这局面红方有一步杀（俥(4,2)->(4,1)，将被两马封住、俥有保护）：深度 1 就该看见。
+  var fen = '3nkn3/R8/4R4/9/9/9/9/9/9/4K4 w - - 0 1';
+  var r = AI.findBestMove(new Position(fen), {
+    level: 'master', depth: 1, deterministic: true, useBook: false, moveNumber: 999
+  });
+  console.log('        深度 1：分值 ' + r.score + '，mateIn=' + r.mateIn + '（修复前是 11308 / 0）');
+  assert('深度 1 就报出一步杀', r.mateIn, 1);
+  truthy('深度 1 的分值是杀棋分', r.score > AI.MATE - 1000);
+})();
+
 console.log('\n----------------------------------------');
 console.log('通过 ' + passed + ' 项，失败 ' + failed + ' 项');
 if (failed > 0) {
