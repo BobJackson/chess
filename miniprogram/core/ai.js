@@ -43,6 +43,11 @@ var NULL_REDUCTION = 2;
 // 实测分支因子约 2.75（中局 depth 8 约 1.2s → depth 9 约 3.3s），取 2.5 略宽松，
 // 让"刚好装得下"的下一层仍然去试。
 var NEXT_DEPTH_FACTOR = 2.5;
+
+// 无用着削减（futility）：depth 1 时若静态评估离 alpha 还差一大截，安静走法几乎不可能
+// 翻盘，直接跳过、不展开子树。吃子不跳（容易漏杀），第一手不跳（保底），将军时不跳。
+// 只用在 depth 1——再往上"差一大截"的判断就不可靠了。
+var FUTILITY_MARGIN = 200;
 var NULL_MIN_PIECES = 9;
 
 // ---------------------------------------------------------------------------
@@ -296,15 +301,25 @@ function quiesce(pos, alpha, beta, ply, qply, ctx) {
   if ((ctx.nodes & 255) === 0 && Date.now() > ctx.deadline) ctx.aborted = true;
   if (ctx.aborted) return 0;
 
-  var best = EV.evaluateForSide(pos);
-  if (best >= beta) return best;
-  if (best > alpha) alpha = best;
-  if (qply >= MAX_QPLY || ply >= MAX_PLY + MAX_QPLY) return best;
+  // 被将军时不能"站着不动"：静态搜索必须搜**全部应将**（走将 / 垫子这类应法不是吃子，
+  // 默认的 capturesOnly 会把它们全漏掉）。负amax 层面的将军延伸只兜住了 depth 0 那一层，
+  // 吃子交换里再将军（qply ≥ 1）就漏了——所以这里也要处理。
+  var inCheck = MG.isChecked(pos, pos.side);
+  var best = -INF;
+  if (!inCheck) {
+    best = EV.evaluateForSide(pos);
+    if (best >= beta) return best;
+    if (best > alpha) alpha = best;
+  }
+  if (qply >= MAX_QPLY || ply >= MAX_PLY + MAX_QPLY) {
+    // 到搜索上限：被将军时不能拿静态评估糊弄，那正是水平线效应本身
+    return inCheck ? EV.evaluateForSide(pos) : best;
+  }
 
   var stack = ctx.moveStack;
-  var start = MG.genLegalMovesInPlace(pos, pos.side, stack, true, ctx.filterUndo);
+  var start = MG.genLegalMovesInPlace(pos, pos.side, stack, !inCheck, ctx.filterUndo);
   var end = stack.length;
-  if (end === start) return best;
+  if (end === start) return inCheck ? -MATE + ply : best; // 无路可走：将死或困毙
 
   orderMoves(pos, ctx, start, end, ply);
 
@@ -315,7 +330,8 @@ function quiesce(pos, alpha, beta, ply, qply, ctx) {
     var to = MG.moveTo(move);
 
     // 增量剪枝：即使白吃掉该子仍无法提升 alpha 时直接跳过
-    if (best + EV.pieceValue(pos.board[to]) + 200 < alpha) continue;
+    // （被将军时 best 不是静态评估而是 -INF，不能套这个判断）
+    if (!inCheck && best + EV.pieceValue(pos.board[to]) + 200 < alpha) continue;
 
     pos.makeMove(from, to, undo);
     var score = -quiesce(pos, -beta, -alpha, ply + 1, qply + 1, ctx);
@@ -516,11 +532,19 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
   var bestMove = stack[start];
   var alphaAtEntry = alpha;
 
+  // 无用着削减的判据（只在 depth 1 算，其它深度不适用）
+  var futile = false;
+  if (depth === 1 && !inCheck && alpha < MATE - 1000) {
+    futile = EV.evaluateForSide(pos) + FUTILITY_MARGIN <= alpha;
+  }
+
   for (var i = start; i < end; i++) {
     var move = stack[i];
     var from = MG.moveFrom(move);
     var to = MG.moveTo(move);
     var quiet = pos.board[to] === C.EMPTY;
+
+    if (futile && i > start && quiet) continue;
 
     pos.makeMove(from, to, undo);
     if (!quiet) ctx.pieces--;
