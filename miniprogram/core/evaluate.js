@@ -143,6 +143,10 @@ var PST = {
 // 残局判定阈值：双方非将帅子力总和低于该值时视为进入残局
 var ENDGAME_MATERIAL = 2200;
 
+// 残局里马炮的相对价值调整（"残局马胜炮"）：子力越少越明显
+var ENDGAME_HORSE_BONUS = 80;
+var ENDGAME_CANNON_PENALTY = 80;
+
 // ---------------------------------------------------------------------------
 // 将帅安全
 //
@@ -255,15 +259,21 @@ function evaluate(pos) {
     if (type === 7) {
       // 残局时过河兵价值显著提升
       positional = Math.round(positional * (1 + endgame * 0.6));
-    } else if (type === 4) {
-      // 残局时马缺少炮架配合、且子力稀薄，价值略降
-      positional = Math.round(positional * (1 - endgame * 0.25));
+    }
+
+    // 残局调整：**马升值、炮贬值**（象棋常识"残局马胜炮"——炮要靠炮架，残局子力稀薄、
+    // 炮架难找，马反而灵活）。原来这里是反的（注释写"马缺少炮架配合"——把马炮的特性
+    // 记混了），而且只缩 PST（±6）量级也不够。改用子力价值调整，量级才够。
+    var endgameAdj = 0;
+    if (endgame > 0) {
+      if (type === 4) endgameAdj = Math.round(endgame * ENDGAME_HORSE_BONUS);
+      else if (type === 6) endgameAdj = -Math.round(endgame * ENDGAME_CANNON_PENALTY);
     }
 
     if (piece > 0) {
-      score += PIECE_VALUE[type] + positional;
+      score += PIECE_VALUE[type] + positional + endgameAdj;
     } else {
-      score -= PIECE_VALUE[type] + positional;
+      score -= PIECE_VALUE[type] + positional + endgameAdj;
     }
 
     // 机动性 / 子力堵塞：马腿被占、车炮的路被自家子挡住

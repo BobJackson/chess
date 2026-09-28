@@ -48,7 +48,7 @@ function parseArgs(argv) {
     save: null, control: null, ladder: false, selfControl: false, json: false,
     depthA: null, depthB: null,
     levelA: 'master', levelB: 'master',
-    positions: 59, seed: 20260927, suites: 1
+    positions: 59, endgame: 0, seed: 20260927, suites: 1
   };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
@@ -72,6 +72,7 @@ function parseArgs(argv) {
       o.levelB = lv.length > 1 ? lv[1] : lv[0];
     }
     else if (a === '--positions') o.positions = parseInt(argv[++i], 10);
+    else if (a === '--endgame') o.endgame = parseInt(argv[++i], 10);
     else if (a === '--seed') o.seed = parseInt(argv[++i], 10);
     else if (a.charAt(0) !== '-') o.control = a;
   }
@@ -90,15 +91,23 @@ function makeRng(seed) {
   };
 }
 
-/** 从初始局面随机走 10~23 手，取互不相同、且走子方不被将的局面 */
-function genPositions(rng, count) {
+/**
+ * 生成局面。
+ * @param {string} [phase] 'mid'（默认）随机走 10~23 手；'end' 走 40~70 手，且要求
+ *        双方子力和 < ENDGAME_MATERIAL、双方子力差 ≤ 200（大致均势）。
+ *        加 'end' 是必须的：只测中局的话，**残局相关的评估项（兵值缩放、马炮残局调整、
+ *        残局系数）根本不会被走到**——2026-09-28 查出来套件里 50 个局面全是非残局。
+ */
+function genPositions(rng, count, phase) {
+  var endgame = phase === 'end';
   var seen = {};
   var fens = [];
   var guard = 0;
-  while (fens.length < count && guard++ < count * 40) {
+  var guardMax = count * (endgame ? 400 : 40);
+  while (fens.length < count && guard++ < guardMax) {
     var pos = new Position();
     var undo = { from: 0, to: 0, piece: 0, captured: 0, side: 0 };
-    var target = 10 + ((rng() * 14) | 0);
+    var target = endgame ? 40 + ((rng() * 31) | 0) : 10 + ((rng() * 14) | 0);
     for (var ply = 0; ply < target; ply++) {
       var legal = MG.genLegalMoves(pos, pos.side);
       if (!legal.length) break;
@@ -106,6 +115,12 @@ function genPositions(rng, count) {
       pos.makeMove(MG.moveFrom(mv), MG.moveTo(mv), undo);
     }
     if (MG.isChecked(pos, pos.side)) continue;
+    if (endgame) {
+      if (totalMaterial(pos) >= EV.ENDGAME_MATERIAL) continue;
+      var md = material(pos);
+      if (md < 0) md = -md;
+      if (md > 200) continue;
+    }
     var fen = pos.toFen();
     var key = fen.split(' ')[0] + ' ' + fen.split(' ')[1];
     if (seen[key]) continue;
@@ -113,6 +128,19 @@ function genPositions(rng, count) {
     fens.push(fen);
   }
   return fens;
+}
+
+/** 双方子力和（不含将帅） */
+function totalMaterial(pos) {
+  var s = 0;
+  for (var i = 0; i < C.BOARD_SIZE; i++) {
+    var p = pos.board[i];
+    if (p === C.EMPTY) continue;
+    var t = p > 0 ? p : -p;
+    if (t === 1) continue;
+    s += EV.PIECE_VALUE[t];
+  }
+  return s;
 }
 
 /** 红方视角子力差（不含将帅） */
@@ -240,7 +268,10 @@ function main() {
 
   // 跑一套局面，返回胜负和
   function runSuite(seed, positions) {
-    var fens = genPositions(makeRng(seed), positions);
+    var fens = genPositions(makeRng(seed), positions, 'mid');
+    if (o.endgame > 0) {
+      fens = fens.concat(genPositions(makeRng(seed ^ 0x5bf03635), o.endgame, 'end'));
+    }
     var a = 0, b = 0, d = 0;
     fens.forEach(function (fen) {
       [true, false].forEach(function (aIsRed) {
@@ -263,8 +294,10 @@ function main() {
     var results = new Array(seeds.length);
     var finished = 0;
 
-    console.log('多套件对抗：' + o.suites + ' 套局面，每套 ' + o.positions + ' 局面 = ' +
-      (o.positions * 2) + ' 局，合计 ' + (o.suites * o.positions * 2) + ' 局');
+    var perSuite = o.positions + o.endgame;
+    console.log('多套件对抗：' + o.suites + ' 套局面，每套 ' + perSuite + ' 局面（' +
+      o.positions + ' 中局 + ' + o.endgame + ' 残局）= ' + (perSuite * 2) + ' 局，合计 ' +
+      (o.suites * perSuite * 2) + ' 局');
     console.log('  当前 ' + cfgText(cfgA) + ' / 对照 ' + cfgText(cfgB) + '，固定深度、无随机化\n');
 
     function report() {
@@ -283,7 +316,7 @@ function main() {
         if (v > max) max = v;
         if (v > 0) pos++; else if (v < 0) neg++; else zero++;
       });
-      console.log('\n  合计净 ' + sum + '（' + (nets.length * o.positions * 2) + ' 局）');
+      console.log('\n  合计净 ' + sum + '（' + (nets.length * (o.positions + o.endgame) * 2) + ' 局）');
       console.log('  各套件：' + nets.map(function (v) { return (v > 0 ? '+' : '') + v; }).join(' ') +
         '   范围 ' + min + ' ~ ' + max);
       var verdict;
@@ -319,7 +352,8 @@ function main() {
 
   console.log('确定性多局面对抗：当前 vs ' + o.control);
   console.log('  当前 ' + cfgText(cfgA) + ' / 对照 ' + cfgText(cfgB) +
-    '，无随机化，' + (r.n / 2) + ' 局面 × 正反两色 = ' + r.n + ' 局');
+    '，无随机化，' + (r.n / 2) + ' 局面（' + o.positions + ' 中局 + ' + o.endgame +
+    ' 残局）× 正反两色 = ' + r.n + ' 局');
   console.log('  当前 ' + r.a + ' 胜 ' + r.d + ' 和 ' + r.b + ' 负  →  净 ' + (r.a - r.b));
   console.log('  （同引擎对照恒为净 0；净 ≥ 10 才算有信号，净 < 10 视为持平）');
   console.log('  提示：单套局面的结果受**局面抽样偏差**影响（换套局面可能变号）。');
