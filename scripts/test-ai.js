@@ -333,10 +333,13 @@ console.log('\n[10] 分片搜索：小切片续搜、时限与取消');
   truthy('1ms 切片确实分多片完成', slices > 0);
   truthy('小切片结果走法合法', r && MG.genLegalMoves(pos, pos.side).indexOf(r.move) >= 0);
 
-  // 大师档（非确定性）：总时限内必须出结果，不能让切片拖死
+  // 大师档（非确定性）：总时限内必须出结果，不能让切片拖死。
+  // 看门狗给得宽松（20s）：大师档预算是 4.5s，但 12ms 小切片叠上机器负载会把实际墙钟
+  // 拉长，8s 时偶发误报（本机撞到过）。这条断言真正要保证的是"会返回、不挂死"，
+  // 时限本身由 level-budget / bench-levels 用产品路径核（实测最大 4501ms）。
   var s2 = AI.createSearch(new Position(), { level: 'master', moveNumber: 999, useBook: false });
   var t0 = Date.now();
-  while (!s2.step(12)) { if (Date.now() - t0 > 8000) break; }
+  while (!s2.step(12)) { if (Date.now() - t0 > 20000) break; }
   var r2 = s2.getResult();
   truthy('大师档在时限内出结果', !!r2);
   truthy('大师档至少完成一层', r2 && r2.depth >= 1);
