@@ -24,6 +24,7 @@
     "bench:games": "node scripts/bench-levels.js --games 1",
     "match": "node scripts/match.js",
     "level:audit": "node scripts/level-audit.js",
+    "book:audit": "node scripts/book-audit.js",
     "gen:sfx": "node scripts/gen-sfx.js",
     "gen:bgm": "node scripts/gen-bgm.js",
     "gen:voice": "node scripts/gen-mate-voice.js"

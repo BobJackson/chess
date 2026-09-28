@@ -206,6 +206,24 @@ console.log('\n[7] 开局库');
   var r = AI.findBestMove(new Position(), { level: 'hard' });
   console.log('        困难难度开局选择 ' + describeMove(r.move) + '，book=' + r.book);
   assert('初始局面命中开局库', r.book, true);
+
+  // 开局多样性：库不能塌成"盘盘同一个开局"。2026-09-27 扩容前首手只有 10 种、
+  // 最常见占 38%；扩容后 16 种 / 32%。这里钉住下限，防止以后加线路时又集中回去。
+  var firstCount = {};
+  var N = 400;
+  for (var k = 0; k < N; k++) {
+    var bm = BOOK.getBookMove(new Position());
+    firstCount[bm] = (firstCount[bm] || 0) + 1;
+  }
+  var kinds = Object.keys(firstCount).length;
+  var topShare = 0;
+  Object.keys(firstCount).forEach(function (key) {
+    if (firstCount[key] > topShare) topShare = firstCount[key];
+  });
+  console.log('        首手种类 ' + kinds + ' 种，最常见占 ' + Math.round(topShare / N * 100) + '%');
+  truthy('开局库线路数 ≥ 30', BOOK.BOOK_LINES.length >= 30);
+  truthy('首手种类 ≥ 12', kinds >= 12);
+  truthy('最常见首手占比 ≤ 40%', topShare / N <= 0.40);
 })();
 
 console.log('\n[8] 开局变化与中局确定性');
