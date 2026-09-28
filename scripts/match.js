@@ -20,6 +20,11 @@
  *                  所以这时测的就是纯粹的"深度阶梯"）。
  *   --ladder        难度阶梯：相邻档两两对抗（同一份引擎，只差档位参数）。
  *   --self-control  阶梯模式下，每对先跑一次同档自对照（结果翻倍耗时，仅用于校准）。
+ *   --suites N      跑 N 套**不同种子的局面**并汇总（子进程并行）。
+ *                   **判定评估类改动必须用它**：单一局面套件的结果受局面抽样偏差影响，
+ *                   同一对照换套局面结论可能变号（2026-09-28 实测 LMR 那条 +2 → −5）。
+ *                   判读看"是否全部同号"，有正有负就说明效应落在偏差之下。
+ *   --json          只输出一行 JSON（供 --suites 的子进程用，一般不用手调）
  *   --positions N   局面套件大小（默认 59，即 118 局）
  *   --seed S        局面生成的随机种子（默认 20260927，保证可复现）
  *
@@ -40,16 +45,18 @@ var CORE_FILES = ['ai.js', 'constants.js', 'movegen.js', 'position.js', 'evaluat
 
 function parseArgs(argv) {
   var o = {
-    save: null, control: null, ladder: false, selfControl: false,
+    save: null, control: null, ladder: false, selfControl: false, json: false,
     depthA: null, depthB: null,
     levelA: 'master', levelB: 'master',
-    positions: 59, seed: 20260927
+    positions: 59, seed: 20260927, suites: 1
   };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     if (a === '--save') o.save = argv[++i];
     else if (a === '--ladder') o.ladder = true;
     else if (a === '--self-control') o.selfControl = true;
+    else if (a === '--json') o.json = true;
+    else if (a === '--suites') o.suites = parseInt(argv[++i], 10);
     else if (a === '--depth') {
       var d = String(argv[++i]);
       if (d.indexOf(':') >= 0) {
@@ -226,26 +233,97 @@ function main() {
   var cfgA = { level: o.levelA, depth: o.depthA };
   var cfgB = { level: o.levelB, depth: o.depthB };
 
-  var fens = genPositions(makeRng(o.seed), o.positions);
-  var aWin = 0, bWin = 0, draw = 0;
-  fens.forEach(function (fen) {
-    [true, false].forEach(function (aIsRed) {
-      var res = play(A, B, fen, aIsRed, cfgA, cfgB);
-      if (res === 'A') aWin++;
-      else if (res === 'B') bWin++;
-      else draw++;
-    });
-  });
-
   function cfgText(cfg) {
     var d = cfg.depth || A.LEVELS[cfg.level].depth;
     return cfg.level + '(d' + d + ')';
   }
+
+  // 跑一套局面，返回胜负和
+  function runSuite(seed, positions) {
+    var fens = genPositions(makeRng(seed), positions);
+    var a = 0, b = 0, d = 0;
+    fens.forEach(function (fen) {
+      [true, false].forEach(function (aIsRed) {
+        var res = play(A, B, fen, aIsRed, cfgA, cfgB);
+        if (res === 'A') a++;
+        else if (res === 'B') b++;
+        else d++;
+      });
+    });
+    return { a: a, b: b, d: d, n: fens.length * 2 };
+  }
+
+  // ---- 多套件模式 ----
+  // 单一局面套件的结果受**局面抽样偏差**影响：同一对照换套局面，结论可能变号
+  // （2026-09-28 实测 LMR 那条从 +2 变 −5）。所以判定评估类改动要看多套局面是否同号。
+  if (o.suites > 1 && !o.json) {
+    var cp = require('child_process');
+    var seeds = [];
+    for (var si = 0; si < o.suites; si++) seeds.push(o.seed + si * 7919);
+    var results = new Array(seeds.length);
+    var finished = 0;
+
+    console.log('多套件对抗：' + o.suites + ' 套局面，每套 ' + o.positions + ' 局面 = ' +
+      (o.positions * 2) + ' 局，合计 ' + (o.suites * o.positions * 2) + ' 局');
+    console.log('  当前 ' + cfgText(cfgA) + ' / 对照 ' + cfgText(cfgB) + '，固定深度、无随机化\n');
+
+    function report() {
+      var nets = [];
+      results.forEach(function (r, idx) {
+        if (!r) { console.log('  套件 ' + (idx + 1) + '：跑失败'); return; }
+        nets.push(r.a - r.b);
+        console.log('  套件 ' + (idx + 1) + '（种子 ' + seeds[idx] + '）：净 ' +
+          String(r.a - r.b).padStart(4) + '   ' + r.a + '胜/' + r.d + '和/' + r.b + '负');
+      });
+      if (!nets.length) return;
+      var sum = 0, min = nets[0], max = nets[0], pos = 0, neg = 0, zero = 0;
+      nets.forEach(function (v) {
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+        if (v > 0) pos++; else if (v < 0) neg++; else zero++;
+      });
+      console.log('\n  合计净 ' + sum + '（' + (nets.length * o.positions * 2) + ' 局）');
+      console.log('  各套件：' + nets.map(function (v) { return (v > 0 ? '+' : '') + v; }).join(' ') +
+        '   范围 ' + min + ' ~ ' + max);
+      var verdict;
+      if (pos > 0 && neg === 0) verdict = '全部同号（' + pos + ' 套为正）→ 方向可信，幅度看合计净';
+      else if (neg > 0 && pos === 0) verdict = '全部同号（' + neg + ' 套为负）→ 方向可信，幅度看合计净';
+      else if (pos === 0 && neg === 0) verdict = '各套件全为 0 → 无差别';
+      else verdict = '**有正有负**（' + pos + ' 正 / ' + neg + ' 负）→ 效应落在抽样偏差之下，判不出来';
+      console.log('  判读：' + verdict);
+    }
+
+    seeds.forEach(function (sd, idx) {
+      var args = [o.control, '--positions', String(o.positions), '--seed', String(sd),
+        '--json', '--level', o.levelA + ':' + o.levelB];
+      if (o.depthA) args.push('--depth', o.depthA + ':' + (o.depthB || o.depthA));
+      var ch = cp.fork(__filename, args, { silent: true });
+      var buf = '';
+      ch.stdout.on('data', function (c) { buf += c; });
+      ch.on('exit', function () {
+        try { results[idx] = JSON.parse(buf.trim().split('\n').pop()); }
+        catch (e) { results[idx] = null; }
+        if (++finished === seeds.length) report();
+      });
+    });
+    return;
+  }
+
+  var r = runSuite(o.seed, o.positions);
+
+  if (o.json) {
+    console.log(JSON.stringify({ a: r.a, b: r.b, d: r.d, n: r.n, seed: o.seed }));
+    return;
+  }
+
   console.log('确定性多局面对抗：当前 vs ' + o.control);
   console.log('  当前 ' + cfgText(cfgA) + ' / 对照 ' + cfgText(cfgB) +
-    '，无随机化，' + fens.length + ' 局面 × 正反两色 = ' + (fens.length * 2) + ' 局');
-  console.log('  当前 ' + aWin + ' 胜 ' + draw + ' 和 ' + bWin + ' 负  →  净 ' + (aWin - bWin));
+    '，无随机化，' + (r.n / 2) + ' 局面 × 正反两色 = ' + r.n + ' 局');
+  console.log('  当前 ' + r.a + ' 胜 ' + r.d + ' 和 ' + r.b + ' 负  →  净 ' + (r.a - r.b));
   console.log('  （同引擎对照恒为净 0；净 ≥ 10 才算有信号，净 < 10 视为持平）');
+  console.log('  提示：单套局面的结果受**局面抽样偏差**影响（换套局面可能变号）。');
+  console.log('        判定评估类改动请加 --suites 4，看多套局面是否同号。');
 }
 
 main();
