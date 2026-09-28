@@ -37,6 +37,12 @@ var LMR_REDUCTION = 1;
 // 这一轮门槛提到 depth ≥ 5（空着后至少还搜 2 层），且排序已全排序。
 var NULL_MIN_DEPTH = 5;
 var NULL_REDUCTION = 2;
+
+// 迭代加深的预算预判：上一层耗时 × 本系数若超过剩余时限，下一层开了也会被砍掉、
+// 结果作废——白等一场。所以提前收手，把已完成的那一层交出去。
+// 实测分支因子约 2.75（中局 depth 8 约 1.2s → depth 9 约 3.3s），取 2.5 略宽松，
+// 让"刚好装得下"的下一层仍然去试。
+var NEXT_DEPTH_FACTOR = 2.5;
 var NULL_MIN_PIECES = 9;
 
 // ---------------------------------------------------------------------------
@@ -84,7 +90,7 @@ var LEVELS = {
     noise: 0, topN: 1, spread: 0, blunder: 0, useBook: true, openingTopN: 2, openingSpread: 12
   },
   master: {
-    key: 'master', label: '大师', depth: 8, time: 4500, exact: false,
+    key: 'master', label: '大师', depth: 10, time: 4500, exact: false,
     noise: 0, topN: 1, spread: 0, blunder: 0, useBook: true, openingTopN: 2, openingSpread: 8
   }
 };
@@ -520,11 +526,20 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     if (!quiet) ctx.pieces--;
 
     var score;
-    // 晚走法削减：全排序之后靠后的安静走法确实"不太可能好"，先减一层搜；
-    // 抬升了 alpha 说明判断错了，再按原深度补搜（吃子不削减，容易漏杀）
+    // 零窗口（PVS）：只有第一手值全窗口。其余走法先用 (alpha, alpha+1) 的窄窗口试探
+    // ——绝大多数走法在这里就被否掉，省下全窗口的开销；只有真的抬升了 alpha 才按全窗口
+    // 重搜。这依赖走法排序质量（有全排序 + 置换表走法 + 杀手 + 历史撑着）。
+    // 晚走法削减：全排序之后靠后的安静走法确实"不太可能好"，先减一层 + 零窗口搜；
+    // 抬升了 alpha 说明判断错了，再按原深度全窗口补搜（吃子不削减，容易漏杀）。
+    var nullWindow = (i > start);
     if (quiet && depth >= LMR_MIN_DEPTH && i - start >= LMR_MIN_MOVES) {
-      score = -negamax(pos, depth - 1 - LMR_REDUCTION, -beta, -alpha, ply + 1, ctx);
+      score = -negamax(pos, depth - 1 - LMR_REDUCTION, -alpha - 1, -alpha, ply + 1, ctx);
       if (!ctx.aborted && score > alpha) {
+        score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
+      }
+    } else if (nullWindow) {
+      score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, ctx);
+      if (!ctx.aborted && score > alpha && score < beta) {
         score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
       }
     } else {
@@ -672,12 +687,18 @@ function findBestMove(pos, options) {
   var scored = null;
   var bestScore = 0;
   var completedDepth = 0;
+  var lastIterMs = 0;
 
   for (var depth = 1; depth <= maxDepth; depth++) {
+    // 预算预判：装不下的下一层不开了（见 NEXT_DEPTH_FACTOR 的说明）
+    if (lastIterMs > 0 && lastIterMs * NEXT_DEPTH_FACTOR > ctx.deadline - Date.now()) break;
+
+    var iterStart = Date.now();
     ctx.aborted = false;
     var result = searchRoot(pos, depth, !!level.exact, ctx);
     if (!result) break; // 本层超时未完成，沿用上一层结果
 
+    lastIterMs = Date.now() - iterStart;
     scored = result.scored;
     bestScore = result.bestScore;
     completedDepth = depth;

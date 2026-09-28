@@ -28,7 +28,8 @@
     "node:bench": "node scripts/node-bench.js",
     "gen:sfx": "node scripts/gen-sfx.js",
     "gen:bgm": "node scripts/gen-bgm.js",
-    "gen:voice": "node scripts/gen-mate-voice.js"
+    "gen:voice": "node scripts/gen-mate-voice.js",
+    "level:budget": "node scripts/level-budget.js"
   },
   "engines": {
     "node": ">=12"
