@@ -28,6 +28,12 @@ var MAX_QPLY = 14;
 var LMR_MIN_DEPTH = 4;
 var LMR_MIN_MOVES = 4;
 var LMR_REDUCTION = 1;
+// 削减层数随"第几手"与"节点深度"递增（对数式）：越靠后、越深的安静走法越不可能好。
+// 2026-09-28 实测（对比固定减 1 层）：节点 -40%、墙钟 -36%；固定深度对抗 d6 净 -5
+// （90 局，噪声带内，等深度精度略降）；但**等时下明显更强**——大师档 30 个局面里
+// 跑到 10 层的从 14 个增到 21 个，中位用时从 3.0s 降到 2.0s。典型的"速度类技术"。
+var LMR_MORE_MOVES = 10;
+var LMR_DEEP_DEPTH = 8;
 
 // 空着裁剪（null-move）：不是将军、子力还够时，先假设自己不走一手让对方连走两步，
 // 若这样对手都翻不了盘就直接截断。象棋几乎没有被迫走子（困毙极罕见），原理上安全。
@@ -46,7 +52,10 @@ var NEXT_DEPTH_FACTOR = 2.5;
 
 // 无用着削减（futility）：depth 1 时若静态评估离 alpha 还差一大截，安静走法几乎不可能
 // 翻盘，直接跳过、不展开子树。吃子不跳（容易漏杀），第一手不跳（保底），将军时不跳。
-// 只用在 depth 1——再往上"差一大截"的判断就不可靠了。
+//
+// 2026-09-28 试过扩到 depth 2（余量 400）并加 razoring（评估差 400 就直接下沉到静态
+// 搜索、够不着 alpha 就交差）：节点合计 -11%、墙钟 -6%，但确定性对抗 **净 -12**（90 局）
+// ——省下的节点抵不过准确度的损失，两项都已回退。剪枝不是越多越好。
 var FUTILITY_MARGIN = 200;
 var NULL_MIN_PIECES = 9;
 
@@ -557,7 +566,10 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     // 抬升了 alpha 说明判断错了，再按原深度全窗口补搜（吃子不削减，容易漏杀）。
     var nullWindow = (i > start);
     if (quiet && depth >= LMR_MIN_DEPTH && i - start >= LMR_MIN_MOVES) {
-      score = -negamax(pos, depth - 1 - LMR_REDUCTION, -alpha - 1, -alpha, ply + 1, ctx);
+      var lmrR = LMR_REDUCTION;
+      if (i - start >= LMR_MORE_MOVES) lmrR++;
+      if (depth >= LMR_DEEP_DEPTH) lmrR++;
+      score = -negamax(pos, depth - 1 - lmrR, -alpha - 1, -alpha, ply + 1, ctx);
       if (!ctx.aborted && score > alpha) {
         score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, ctx);
       }
