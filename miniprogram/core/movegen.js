@@ -366,10 +366,28 @@ function genLegalMovesInPlace(pos, side, out, capturesOnly, undo) {
   var start = out.length;
   genPseudoMoves(pos, side, out, capturesOnly);
   var write = start;
+
+  // 快路径：象棋里所有"直线攻击"都沿行或列，所以只要**起点和终点都不在己方将的
+  // 同行/同列上**，这一步就不可能改变任何指向己方将的直线——既不会露将（走开当挡子），
+  // 也不会自造炮架（炮正好需要"恰好一个炮架"，把子走到线上反而可能被将）。
+  // 再加上"己方未被将"与"不是走将本身"，这三条同时成立时该走法一定合法，
+  // 不必走子再做全盘攻击扫描。
+  // 2026-09-29：profile 显示 isChecked 占 23.5%（每个伪合法着法一次全盘扫描）。
+  var kingIdx = pos.kingPos[side];
+  var kingFile = kingIdx >= 0 ? C.fileOf(kingIdx) : -1;
+  var kingRank = kingIdx >= 0 ? C.rankOf(kingIdx) : -1;
+  var inCheck = isChecked(pos, side);
+
   for (var i = start; i < out.length; i++) {
     var m = out[i];
     var from = moveFrom(m);
     var to = moveTo(m);
+    if (!inCheck && from !== kingIdx &&
+        C.fileOf(from) !== kingFile && C.rankOf(from) !== kingRank &&
+        C.fileOf(to) !== kingFile && C.rankOf(to) !== kingRank) {
+      out[write++] = m;
+      continue;
+    }
     pos.makeMove(from, to, undo);
     var legal = !isChecked(pos, side);
     pos.unmakeMove(undo);
