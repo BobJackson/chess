@@ -51,7 +51,8 @@ var NEBULA = {
     pieceFaceMid: '#fdf3d8',
     pieceFaceBottom: '#e8dcc0',
     pieceEdge: '#8a6db8',
-    pieceShadow: 'rgba(8,4,20,0.55)',
+    // 深色主题下投影要收着点：0.55 的浓影会把棋子周围那圈光晕整个压掉
+    pieceShadow: 'rgba(6,3,16,0.34)',
     redText: '#e04a3a',
     blackText: '#2a1f45',
     selected: '#9b7bff',
@@ -60,7 +61,10 @@ var NEBULA = {
     lastMove: 'rgba(233,168,52,0.95)',
     check: 'rgba(224,74,58,0.95)',
     hint: 'rgba(155,123,255,0.92)',
-    threat: 'rgba(224,74,58,0.95)'
+    // 威胁色比松桂更亮更暖（偏珊瑚红）：紫底上冷调红与盘面同色系，混完几乎看不出
+    threat: 'rgba(255,106,74,0.95)',
+    // 深色盘面需要更强的光晕（松桂是 [0.38, 0.15]）
+    glowAlpha: [0.62, 0.30]
   },
   widgets: {
     bg: '#1a1230',

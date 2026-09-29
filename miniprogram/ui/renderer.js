@@ -35,7 +35,11 @@ var THEME = {
   // 被威胁的棋子：与「上一步」用同一套光晕形状、只换颜色。
   // 刻意取偏冷的深绛红，与琥珀拉开距离——两件事必须一眼分得开。
   // 同一局面被威胁的子可能有好几枚，**统一用这一个颜色**，不再按子分色。
-  threat: 'rgba(198,32,48,0.95)'
+  threat: 'rgba(198,32,48,0.95)',
+  // 光晕强度 [峰值, 中段]。单独列成主题键是因为**深色主题需要更强的 alpha**：
+  // 光晕是半透明叠在盘面上，浅木底上 0.38 已经很清楚，深紫底上同样 0.38 混出来的
+  // 颜色与盘面亮度几乎持平（实测差 ~1），再被棋子的投影一压就彻底看不见了。
+  glowAlpha: [0.38, 0.15]
 };
 
 /**
@@ -410,9 +414,13 @@ function drawPieceGlow(ctx, L, idx, color, boost) {
   var r0 = L.pieceRadius * 0.90;
   var r1 = L.pieceRadius * (1.90 + 0.40 * b);
 
+  // 强度由主题给（深色主题要更强，见 THEME.glowAlpha 的说明）
+  var a0 = THEME.glowAlpha[0];
+  var a1 = THEME.glowAlpha[1];
+
   var g = ctx.createRadialGradient(x, y, r0, x, y, r1);
-  g.addColorStop(0, withAlpha(color, 0.38 + 0.30 * b));
-  g.addColorStop(0.45, withAlpha(color, 0.15 + 0.15 * b));
+  g.addColorStop(0, withAlpha(color, a0 + 0.30 * b));
+  g.addColorStop(0.45, withAlpha(color, a1 + 0.15 * b));
   g.addColorStop(1, withAlpha(color, 0));
 
   ctx.save();

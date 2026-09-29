@@ -868,6 +868,16 @@ console.log('\n[18] 主题切换：紫金夜 ↔ 松桂 往返还原');
   assert('屏幕渐变首站换色', Cm.PALETTE.bgStops[0], '#1e1436');
   assert('账本分隔线换色', Wm.THEME.divider, 'rgba(217,184,120,0.18)');
 
+  // 深色主题的盘面标记适配（2026-09-29）：光晕是半透明叠在盘面上，深底需要更强，
+  // 而且棋子的投影不能太浓——否则那圈光晕会被整个压掉、看不见。
+  function shadowAlpha(v) {
+    var m = /rgba\(([^)]+)\)/.exec(v);
+    return m ? parseFloat(m[1].split(',')[3]) : 1;
+  }
+  assert('深色主题光晕更强', Rm.THEME.glowAlpha[0] > 0.38 && Rm.THEME.glowAlpha[1] > 0.15, true);
+  assert('深色主题投影不更浓', shadowAlpha(Rm.THEME.pieceShadow) <= 0.34, true);
+  assert('深色主题威胁色已换', Rm.THEME.threat !== 'rgba(198,32,48,0.95)', true);
+
   // 未知 key 静默拒绝且不改动现状
   assert('未知主题返回 false', Themes.setTheme('nope'), false);
   assert('主题未被改动', Themes.key(), 'nebula');
