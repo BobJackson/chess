@@ -209,7 +209,15 @@ function genPositions(rng, count, phase) {
   return fens;
 }
 
-/** 双方子力和（不含将帅） */
+// 判胜/判和用的子力表**固定**，不读被测引擎的 PIECE_VALUE。
+//
+// 为什么：原来 material() 用的是 `EV.PIECE_VALUE`，而 EV 是**被测仓库**的评估模块——
+// 于是"尺子"会随候选一起变（候选把自己的兵值改了，判读标准也跟着变）。做兵值扫描时
+// 这会形成自我实现的偏差：候选抬高兵值 → 判读也用抬高后的兵值 → 它囤的兵更"值钱"。
+// 固定成象棋传统价值比（车 9 / 炮 4.5 / 马 4 / 士象 2 / 兵 1，统一 ×100）才是中立尺子。
+var ADJ_VALUE = { 1: 10000, 2: 200, 3: 200, 4: 400, 5: 900, 6: 450, 7: 100 };
+
+/** 双方子力和（不含将帅），用固定的中立子力表 */
 function totalMaterial(pos) {
   var s = 0;
   for (var i = 0; i < C.BOARD_SIZE; i++) {
@@ -217,12 +225,12 @@ function totalMaterial(pos) {
     if (p === C.EMPTY) continue;
     var t = p > 0 ? p : -p;
     if (t === 1) continue;
-    s += EV.PIECE_VALUE[t];
+    s += ADJ_VALUE[t];
   }
   return s;
 }
 
-/** 红方视角子力差（不含将帅） */
+/** 红方视角子力差（不含将帅），用固定的中立子力表 */
 function material(pos) {
   var s = 0;
   for (var i = 0; i < C.BOARD_SIZE; i++) {
@@ -230,7 +238,7 @@ function material(pos) {
     if (p === C.EMPTY) continue;
     var t = p > 0 ? p : -p;
     if (t === 1) continue;
-    s += p > 0 ? EV.PIECE_VALUE[t] : -EV.PIECE_VALUE[t];
+    s += p > 0 ? ADJ_VALUE[t] : -ADJ_VALUE[t];
   }
   return s;
 }
@@ -407,12 +415,29 @@ function main() {
       console.log('\n  合计净 ' + sum + '（' + (nets.length * (o.positions + o.endgame) * 2) + ' 局）');
       console.log('  各套件：' + nets.map(function (v) { return (v > 0 ? '+' : '') + v; }).join(' ') +
         '   范围 ' + min + ' ~ ' + max);
+
+      // 统计判读：只看符号一致性太保守（4 套下"3 正 1 负"和"4 套全 0"一样判不出来，
+      // 但两者的证据强度差很多）。这里同时给跨套件标准差与 t 区间——套件之间是不同
+      // 局面、相互独立，所以合计净的 95% 区间 ≈ 合计 ± t(df) · 标准差 · √n。
+      var mean = sum / nets.length;
+      var ss = 0;
+      nets.forEach(function (v) { ss += (v - mean) * (v - mean); });
+      var sd = nets.length > 1 ? Math.sqrt(ss / (nets.length - 1)) : 0;
+      var T95 = [0, 12.71, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262];
+      var t = T95[Math.min(nets.length, 10)];
+      var half = Math.round(t * sd * Math.sqrt(nets.length));
+      console.log('  跨套件标准差 ' + sd.toFixed(1) + '，合计净的 95% 区间 ' +
+        (sum - half) + ' ~ ' + (sum + half));
+
       var verdict;
-      if (pos > 0 && neg === 0) verdict = '全部同号（' + pos + ' 套为正）→ 方向可信，幅度看合计净';
-      else if (neg > 0 && pos === 0) verdict = '全部同号（' + neg + ' 套为负）→ 方向可信，幅度看合计净';
-      else if (pos === 0 && neg === 0) verdict = '各套件全为 0 → 无差别';
-      else verdict = '**有正有负**（' + pos + ' 正 / ' + neg + ' 负）→ 效应落在抽样偏差之下，判不出来';
-      console.log('  判读：' + verdict);
+      var consistent = (pos > 0 && neg === 0) || (neg > 0 && pos === 0);
+      if (pos === 0 && neg === 0) verdict = '各套件全为 0 → 无差别';
+      else if (sum - half > 0) verdict = '区间全在 0 以上 → **正效应可信**';
+      else if (sum + half < 0) verdict = '区间全在 0 以下 → **负效应可信**';
+      else if (consistent) verdict = '符号全同但区间跨 0 → 方向可疑，样本还不够';
+      else verdict = '区间跨 0 且有正有负 → 效应落在抽样偏差之下，判不出来';
+      console.log('  判读：' + verdict + '（' + pos + ' 正 / ' + neg + ' 负' +
+        (zero ? ' / ' + zero + ' 平' : '') + '）');
     }
 
     seeds.forEach(function (sd, idx) {
