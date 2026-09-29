@@ -282,25 +282,52 @@ function moveScore(pos, move, ply, ctx) {
  * 以前只把前 ORDER_K 手做选择排序，其余保持生成顺序——那些没排过序的走法在
  * alpha-beta 里基本等于白搜（好棋排在后面，剪枝就少）。排序质量直接决定剪枝量，
  * 而剪枝是后续一切加速（晚走法削减、空着裁剪）的前提，所以这里排满整个区间。
+ *
+ * 注意：**只有根搜索需要整体排序**（它要遍历全部着法拿分值）。negamax / quiesce
+ * 里绝大多数节点第一手就剪枝了，排完剩下的纯属浪费——那两处改用 scoreMoves +
+ * pickNextMove 按需选取（选出来的顺序与整体选择排序**逐个一致**，所以搜索结果不变）。
  */
 function orderMoves(pos, ctx, start, end, ply) {
+  scoreMoves(pos, ctx, start, end, ply);
   var moves = ctx.moveStack;
   var scores = ctx.scoreStack;
-  var i, j;
-
-  for (i = start; i < end; i++) {
-    scores[i] = moveScore(pos, moves[i], ply, ctx);
-  }
-
-  for (i = start; i < end; i++) {
+  for (var i = start; i < end; i++) {
     var maxIdx = i;
-    for (j = i + 1; j < end; j++) {
+    for (var j = i + 1; j < end; j++) {
       if (scores[j] > scores[maxIdx]) maxIdx = j;
     }
     if (maxIdx !== i) {
       var tm = moves[i]; moves[i] = moves[maxIdx]; moves[maxIdx] = tm;
       var ts = scores[i]; scores[i] = scores[maxIdx]; scores[maxIdx] = ts;
     }
+  }
+}
+
+/** 只给 [start, end) 算分值（不排序） */
+function scoreMoves(pos, ctx, start, end, ply) {
+  var moves = ctx.moveStack;
+  var scores = ctx.scoreStack;
+  for (var i = start; i < end; i++) {
+    scores[i] = moveScore(pos, moves[i], ply, ctx);
+  }
+}
+
+/**
+ * 把 [i, end) 中分值最大的着法换到位置 i
+ *
+ * 这是选择排序的"按需"版本：调用方每取一手就调一次，不提前把整段排完。
+ * 与整体选择排序相比，取出的序列完全相同，只是少了尾部那些用不到的排序。
+ */
+function pickNextMove(ctx, start, end, i) {
+  var moves = ctx.moveStack;
+  var scores = ctx.scoreStack;
+  var maxIdx = i;
+  for (var j = i + 1; j < end; j++) {
+    if (scores[j] > scores[maxIdx]) maxIdx = j;
+  }
+  if (maxIdx !== i) {
+    var tm = moves[i]; moves[i] = moves[maxIdx]; moves[maxIdx] = tm;
+    var ts = scores[i]; scores[i] = scores[maxIdx]; scores[maxIdx] = ts;
   }
 }
 
@@ -337,10 +364,11 @@ function quiesce(pos, alpha, beta, ply, qply, ctx) {
   var end = stack.length;
   if (end === start) return inCheck ? -MATE + ply : best; // 无路可走：将死或困毙
 
-  orderMoves(pos, ctx, start, end, ply);
+  scoreMoves(pos, ctx, start, end, ply);
 
   var undo = ctx.undoPool[ply];
   for (var i = start; i < end; i++) {
+    pickNextMove(ctx, start, end, i); // 按需取出当前最大，不提前排完
     var move = stack[i];
     var from = MG.moveFrom(move);
     var to = MG.moveTo(move);
@@ -527,8 +555,6 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     return -MATE + ply;
   }
 
-  orderMoves(pos, ctx, start, end, ply);
-
   // 空着裁剪：不是将军、子力还够、且不在空着搜索里时，先假设自己不走一手。
   // 空着搜索给出的杀棋分不可信（它比真实着法弱），只用来截断。
   if (depth >= NULL_MIN_DEPTH && !inCheck && !ctx.nullLock &&
@@ -554,7 +580,11 @@ function negamax(pos, depth, alpha, beta, ply, ctx) {
     futile = EV.evaluateForSide(pos) + FUTILITY_MARGIN <= alpha;
   }
 
+  // 分值放在空着裁剪之后算：空着能截断时整段排序就白做了
+  scoreMoves(pos, ctx, start, end, ply);
+
   for (var i = start; i < end; i++) {
+    pickNextMove(ctx, start, end, i); // 按需取出当前最大，不提前排完
     var move = stack[i];
     var from = MG.moveFrom(move);
     var to = MG.moveTo(move);
